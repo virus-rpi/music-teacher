@@ -68,8 +68,17 @@ def midi_listener():
                 pressed_keys[msg.note] = True
                 pressed_fade_keys[msg.note] = pygame.time.get_ticks()
                 pressed_notes_set.add(msg.note)
-                if synth_enabled:
-                    synth.note_on(msg.note, msg.velocity)
+                if teaching_mode:
+                    next_notes = midi_teacher.get_next_notes()
+                    if msg.note in next_notes:
+                        if synth_enabled:
+                            synth.note_on(msg.note, msg.velocity)
+                    else:
+                        if synth_enabled:
+                            synth.play_error_sound()
+                else:
+                    if synth_enabled:
+                        synth.note_on(msg.note, msg.velocity)
                 if teaching_mode:
                     midi_teacher.advance_if_pressed(pressed_notes_set)
             elif msg.type in ("note_off", "note_on"):

@@ -23,5 +23,11 @@ class Synth:
     def pedal_cc(self, control, value):
         self.fs.cc(0, control, value)
 
+    def play_error_sound(self):
+        self.fs.program_select(9, self.sfid, 128, 0)
+        self.fs.noteon(9, 81, 127)
+        self.fs.noteon(9, 71, 127)
+        self.fs.program_select(0, self.sfid, 0, 0)
+
     def delete(self):
         self.fs.delete()

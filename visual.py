@@ -1,4 +1,5 @@
 import pygame
+import pygame.gfxdraw
 
 WHITE_KEY_COLOR = (230, 230, 230)
 BLACK_KEY_COLOR = (40, 40, 40)
@@ -63,7 +64,10 @@ def draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, highlighte
                         color = interpolate_color(HIGHLIGHT_COLOR, WHITE_KEY_COLOR, t)
                     else:
                         del pressed_fade_keys[midi_note]
-            pygame.draw.rect(screen, color, rect, border_radius=KEY_CORNER_RADIUS)
+            try:
+                pygame.draw.rect(screen, color, rect, border_radius=KEY_CORNER_RADIUS)
+            except ValueError:
+                continue
             pygame.draw.rect(screen, (0, 0, 0), rect, 1, border_radius=KEY_CORNER_RADIUS)
             white_index += 1
     white_index = 0
@@ -73,7 +77,7 @@ def draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, highlighte
             if note_names[midi_note % 12] not in ['E', 'B']:
                 black_x = x + WHITE_KEY_WIDTH * 0.7
                 rect = pygame.Rect(black_x, PIANO_Y_OFFSET, BLACK_KEY_WIDTH, BLACK_KEY_HEIGHT)
-                color = BLACK_KEY_COLOR
+                color = BLACK_KEY_COLOR  # Always start with default
                 hand = highlighted_notes.get(midi_note + 1)
                 if hand:
                     color = (0, 140, 255) if hand == 'L' else (255, 60, 60)
@@ -98,8 +102,6 @@ def draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, highlighte
         pygame.draw.rect(screen, (0, 0, 0), rect, 2, border_radius=PEDAL_CORNER_RADIUS)
 
 def draw_progress_bar(screen, progress, dims):
-    """Draws a modern horizontal progress bar at the top of the screen."""
-    import pygame.gfxdraw
     screen_width = dims['SCREEN_WIDTH']
     bar_height = 28
     bar_margin = 24
