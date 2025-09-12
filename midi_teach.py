@@ -9,30 +9,42 @@ class MidiTeacher:
 
     def _extract_chords(self):
         mid = mido.MidiFile(self.midi_path)
-        chords = []
         events = []
-        abs_time = 0
-        for track in mid.tracks:
+        # Collect note_on events with track index
+        for track_idx, track in enumerate(mid.tracks):
             abs_time = 0
             for msg in track:
                 abs_time += msg.time
                 if msg.type == 'note_on' and msg.velocity > 0:
-                    events.append((abs_time, msg.note))
+                    events.append((abs_time, msg.note, track_idx))
         events.sort()
         chords_dict = {}
-        for t, note in events:
-            chords_dict.setdefault(t, set()).add(note)
-        chords = [list(notes) for t, notes in sorted(chords_dict.items())]
+        for t, note, track_idx in events:
+            chords_dict.setdefault(t, []).append((note, track_idx))
+        track_note_counts = {}
+        for _, note, track_idx in events:
+            track_note_counts[track_idx] = track_note_counts.get(track_idx, 0) + 1
+        sorted_tracks = sorted(track_note_counts, key=track_note_counts.get, reverse=True)
+        if len(sorted_tracks) < 2:
+            # Fallback: all notes right hand
+            hand_map = {sorted_tracks[0]: 'R'}
+        else:
+            hand_map = {sorted_tracks[0]: 'R', sorted_tracks[1]: 'L'}
+        chords = []
+        for notes in chords_dict.values():
+            chord = [(note, hand_map.get(track_idx, 'R')) for note, track_idx in notes]
+            chords.append(chord)
         return chords
 
     def get_next_notes(self):
         if self.current_index < len(self.chords):
-            return set(self.chords[self.current_index])
-        return set()
+            # Return dict: {note: hand}
+            return {note: hand for note, hand in self.chords[self.current_index]}
+        return {}
 
     def advance_if_pressed(self, pressed_notes):
         next_notes = self.get_next_notes()
-        if next_notes and next_notes.issubset(pressed_notes):
+        if next_notes and set(next_notes.keys()).issubset(pressed_notes):
             self.current_index += 1
             return True
         return False
@@ -42,7 +54,6 @@ class MidiTeacher:
         self._pending_notes = set()
 
     def get_progress(self):
-        """Returns progress as a float between 0 and 1."""
         if not self.chords:
             return 1.0
         return self.current_index / len(self.chords)

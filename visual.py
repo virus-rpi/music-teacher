@@ -19,9 +19,18 @@ def is_black(note_number):
 def interpolate_color(c1, c2, t):
     return tuple(int(c1[i] + (c2[i] - c1[i]) * t) for i in range(3))
 
+def draw_hand_marker(screen, x, y, width, height, hand, border_radius):
+    indicator_color = (0, 140, 255) if hand == 'L' else (255, 60, 60)
+    inner_rect = pygame.Rect(int(x)+2, int(y)+2, int(width)-4, int(height)-4)
+    pygame.draw.rect(screen, indicator_color, inner_rect, border_radius=int(border_radius))
+    font_size = int(height * 0.7)
+    font = pygame.font.SysFont("Segoe UI", font_size, bold=True)
+    text = font.render(hand, True, (255,255,255))
+    text_rect = text.get_rect(center=(int(x + width//2), int(y + height//2)))
+    screen.blit(text, text_rect)
+
 def draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, highlighted_notes=None):
-    if highlighted_notes is None:
-        highlighted_notes = set()
+    highlighted_notes = highlighted_notes or {}
     screen_width, screen_height = dims['SCREEN_WIDTH'], dims['SCREEN_HEIGHT']
     WHITE_KEY_WIDTH = dims['WHITE_KEY_WIDTH']
     WHITE_KEY_HEIGHT = dims['WHITE_KEY_HEIGHT']
@@ -43,8 +52,9 @@ def draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, highlighte
             x = white_index * WHITE_KEY_WIDTH
             rect = pygame.Rect(x, PIANO_Y_OFFSET, WHITE_KEY_WIDTH, WHITE_KEY_HEIGHT)
             color = WHITE_KEY_COLOR
-            if midi_note in highlighted_notes:
-                color = (255, 255, 0)
+            hand = highlighted_notes.get(midi_note)
+            if hand:
+                color = (0, 140, 255) if hand == 'L' else (255, 60, 60)
             elif pressed_keys.get(midi_note, False):
                 if midi_note in pressed_fade_keys:
                     elapsed = now - pressed_fade_keys[midi_note]
@@ -64,8 +74,9 @@ def draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, highlighte
                 black_x = x + WHITE_KEY_WIDTH * 0.7
                 rect = pygame.Rect(black_x, PIANO_Y_OFFSET, BLACK_KEY_WIDTH, BLACK_KEY_HEIGHT)
                 color = BLACK_KEY_COLOR
-                if (midi_note + 1) in highlighted_notes:
-                    color = (200, 200, 0)
+                hand = highlighted_notes.get(midi_note + 1)
+                if hand:
+                    color = (0, 140, 255) if hand == 'L' else (255, 60, 60)
                 if pressed_keys.get(midi_note + 1, False):
                     if (midi_note + 1) in pressed_fade_keys:
                         elapsed = now - pressed_fade_keys[midi_note + 1]
@@ -91,7 +102,7 @@ def draw_progress_bar(screen, progress, dims):
     import pygame.gfxdraw
     screen_width = dims['SCREEN_WIDTH']
     bar_height = 28
-    bar_margin = 24  # Increased margin for separation
+    bar_margin = 24
     bar_width = int(screen_width * 0.7)
     x = int((screen_width - bar_width) / 2)
     y = bar_margin
