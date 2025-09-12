@@ -57,3 +57,10 @@ class MidiTeacher:
         if not self.chords:
             return 1.0
         return self.current_index / len(self.chords)
+
+    # Debug helper: force-advance by one chord regardless of pressed notes
+    def advance_one(self):
+        if self.current_index < len(self.chords):
+            self.current_index += 1
+            return True
+        return False

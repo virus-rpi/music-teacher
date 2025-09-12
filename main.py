@@ -114,6 +114,13 @@ while running:
                 print(f"Teaching mode: {teaching_mode}")
                 midi_teacher.reset()
                 pressed_notes_set.clear()
+            # Debug: advance teacher by one chord when pressing 'd'
+            if event.key == pygame.K_d and teaching_mode:
+                advanced = midi_teacher.advance_one()
+                if advanced:
+                    print("[Debug] Advanced teacher by one chord.")
+                else:
+                    print("[Debug] Already at end; cannot advance.")
     highlighted_notes = midi_teacher.get_next_notes() if teaching_mode else set()
     draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, highlighted_notes)
     draw_progress_bar(screen, midi_teacher.get_progress(), dims) if teaching_mode else None

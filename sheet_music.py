@@ -29,13 +29,10 @@ _DARK_THRESH = 100            # grayscale threshold for dark pixel
 _BARLINE_MIN_FRAC = 0.30      # min fraction of image height that must be dark in a column
 _BARLINE_MIN_FRAC_HALF = 0.10 # min fraction in both top/bottom halves to avoid clef-only detections
 _BARLINE_SMOOTH = 2           # smooth columns by this half-window
-_FP_WIDTH_FRAC = 0.22         # width fraction of left region used for fingerprint (before barline)
-_FP_SIZE = 24                 # downscaled square for fingerprint
-_FP_DIFF_THRESH = 0.14        # normalized diff threshold to consider two left regions the same
 
 # Theme colors
-_BG_GRAY = 30
-_BG_RGBA = (30, 30, 30, 255)
+_BG_GRAY = 20
+_BG_RGBA = (20, 20, 20, 255)
 
 class SheetMusicRenderer:
     def __init__(self, midi_path, screen_width, height=260, debug=True):
@@ -73,7 +70,7 @@ class SheetMusicRenderer:
                 print("music21 already has musicxmlPath:", current)
                 return True
         except Exception:
-            current = None
+            pass
 
         # try common candidates; prefer explicit full path if available on PATH
         candidates = ["musescore", "mscore", "musescore4", "MuseScore4", "MuseScore3", "MuseScore"]
@@ -106,7 +103,8 @@ class SheetMusicRenderer:
     # ------------------------------
     # Caching helpers
     # ------------------------------
-    def _get_cache_dir(self):
+    @staticmethod
+    def _get_cache_dir():
         """
         Returns the cache directory path (creates if missing).
         """
@@ -229,8 +227,8 @@ class SheetMusicRenderer:
     # ------------------------------
     # Leading content cropping helpers
     # ------------------------------
-    def _find_first_barline_x(self, im: Image.Image):
-        """Return the x position (int) of the first strong vertical barline within the left region, or None."""
+    @staticmethod
+    def _find_first_barline_x(im: Image.Image):
         gray = im.convert("L")
         w, h = gray.size
         px = gray.load()
@@ -388,15 +386,12 @@ class SheetMusicRenderer:
         page_h = im.height
         for (top, bottom) in segs:
             seg_h = max(1, bottom - top)
-            # dynamic padding keeps both staves intact and avoids cutting ledger lines
             pad_est = int(seg_h * _PADDING_FRAC)
             pad = min(_MAX_PADDING, max(_MIN_PADDING, pad_est))
             t = max(0, top - pad)
             b = min(page_h, bottom + pad)
             crop = im.crop((0, t, im.width, b))
-            # NEW: optionally crop leading instrument/clef/key area per system
             crop2, did = self._maybe_crop_leading_content(crop)
-            # Apply dark theme recoloring (white -> #141414, black -> white)
             recolored = self._recolor_to_dark_theme(crop2)
             systems.append(recolored)
         return systems
@@ -445,7 +440,6 @@ class SheetMusicRenderer:
         x = 0
         self.system_boxes = []
         for i, im in enumerate(all_system_images):
-            # vertically center each system in the strip
             y = (max_height - im.height) // 2
             strip.paste(im, (x, y), im)
             self.system_boxes.append((x, im.width))
@@ -462,9 +456,8 @@ class SheetMusicRenderer:
         self.full_width = strip_resized.size[0]
 
         if self.debug:
-            print(f"Built continuous strip: {len(all_system_images)} systems -> width={self.full_width}px")
+            print(f"Built continuous strip: {len(all_system_images)} systems -> width={self.full_width}px at height={self.strip_height}px")
 
-        # Build an approximate mapping from score notes -> x positions along the full strip
         try:
             self._build_note_mapping_from_score(score)
         except Exception as e:
@@ -518,9 +511,6 @@ class SheetMusicRenderer:
         if not notes:
             return
         notes.sort(key=lambda x: x[0])
-        offsets = [o for o, _ in notes]
-        # total number of systems
-        system_count = max(1, len(self.system_boxes))
         total_notes = len(notes)
 
         # compute how many notes per system by simple proportional split
