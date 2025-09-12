@@ -33,6 +33,10 @@ _FP_WIDTH_FRAC = 0.22         # width fraction of left region used for fingerpri
 _FP_SIZE = 24                 # downscaled square for fingerprint
 _FP_DIFF_THRESH = 0.14        # normalized diff threshold to consider two left regions the same
 
+# Theme colors
+_BG_GRAY = 30
+_BG_RGBA = (30, 30, 30, 255)
+
 class SheetMusicRenderer:
     def __init__(self, midi_path, screen_width, height=260, debug=True):
         """
@@ -200,6 +204,28 @@ class SheetMusicRenderer:
             proj.append(white / max(1, w))
         return proj
 
+    @staticmethod
+    def _recolor_to_dark_theme(im: Image.Image):
+        """Map white background to #141414 and black strokes to white, keeping alpha if present."""
+        base = Image.new("RGB", im.size, (255, 255, 255))
+        if im.mode != "RGBA":
+            rgba = im.convert("RGBA")
+        else:
+            rgba = im
+        base.paste(rgba, (0, 0), rgba)
+        gray = ImageOps.grayscale(base)  # 0..255
+        k = 255 - _BG_GRAY
+        lut = [int(255 - (k * v) / 255) for v in range(256)]
+        mapped = gray.point(lut)
+        # Expand to RGB and attach original alpha (or full opaque if none)
+        rgb = Image.merge("RGB", (mapped, mapped, mapped))
+        try:
+            alpha = rgba.split()[3]
+        except Exception:
+            alpha = Image.new("L", im.size, 255)
+        out = Image.merge("RGBA", (*rgb.split(), alpha))
+        return out
+
     # ------------------------------
     # Leading content cropping helpers
     # ------------------------------
@@ -233,11 +259,11 @@ class SheetMusicRenderer:
         if _BARLINE_SMOOTH > 0:
             k = _BARLINE_SMOOTH
             def smooth(arr):
-                out = [0] * len(arr)
+                out = [0.0] * len(arr)
                 for i in range(len(arr)):
                     lo = max(0, i - k)
                     hi = min(len(arr), i + k + 1)
-                    s = 0
+                    s = 0.0
                     for j in range(lo, hi):
                         s += arr[j]
                     out[i] = s / (hi - lo)
@@ -370,7 +396,9 @@ class SheetMusicRenderer:
             crop = im.crop((0, t, im.width, b))
             # NEW: optionally crop leading instrument/clef/key area per system
             crop2, did = self._maybe_crop_leading_content(crop)
-            systems.append(crop2)
+            # Apply dark theme recoloring (white -> #141414, black -> white)
+            recolored = self._recolor_to_dark_theme(crop2)
+            systems.append(recolored)
         return systems
 
     # ------------------------------
@@ -400,7 +428,8 @@ class SheetMusicRenderer:
                 if self.debug:
                     print("failed slicing page", f, ":", e)
                 # fallback: use entire page
-                all_system_images.append(Image.open(f).convert("RGBA"))
+                fallback_im = Image.open(f).convert("RGBA")
+                all_system_images.append(self._recolor_to_dark_theme(fallback_im))
                 page_system_counts.append(1)
 
         if not all_system_images:
@@ -412,7 +441,7 @@ class SheetMusicRenderer:
         total_width = sum(widths)
         max_height = max(heights)
 
-        strip = Image.new("RGBA", (total_width, max_height), (255, 255, 255, 255))
+        strip = Image.new("RGBA", (total_width, max_height), _BG_RGBA)
         x = 0
         self.system_boxes = []
         for i, im in enumerate(all_system_images):
@@ -457,7 +486,7 @@ class SheetMusicRenderer:
         """
         w = max(self.screen_width * 3, 2000)
         h = self.strip_height
-        img = Image.new("RGBA", (w, h), (255, 255, 255, 255))
+        img = Image.new("RGBA", (w, h), _BG_RGBA)
         # convert to pygame surface
         data = img.tobytes()
         self.full_surface = pygame.image.fromstring(data, (w, h), "RGBA").convert_alpha()
