@@ -40,3 +40,9 @@ class MidiTeacher:
     def reset(self):
         self.current_index = 0
         self._pending_notes = set()
+
+    def get_progress(self):
+        """Returns progress as a float between 0 and 1."""
+        if not self.chords:
+            return 1.0
+        return self.current_index / len(self.chords)

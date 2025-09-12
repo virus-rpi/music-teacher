@@ -33,6 +33,7 @@ def draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, highlighte
     PEDAL_Y = dims['PEDAL_Y']
     LOWEST_NOTE = dims['LOWEST_NOTE']
     HIGHEST_NOTE = dims['HIGHEST_NOTE']
+    PIANO_Y_OFFSET = dims['PIANO_Y_OFFSET']
 
     screen.fill(BG_COLOR)
     now = pygame.time.get_ticks()
@@ -40,9 +41,8 @@ def draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, highlighte
     for midi_note in range(LOWEST_NOTE, HIGHEST_NOTE + 1):
         if not is_black(midi_note):
             x = white_index * WHITE_KEY_WIDTH
-            rect = pygame.Rect(x, 20, WHITE_KEY_WIDTH, WHITE_KEY_HEIGHT)
+            rect = pygame.Rect(x, PIANO_Y_OFFSET, WHITE_KEY_WIDTH, WHITE_KEY_HEIGHT)
             color = WHITE_KEY_COLOR
-            # Highlight teaching notes in yellow
             if midi_note in highlighted_notes:
                 color = (255, 255, 0)
             elif pressed_keys.get(midi_note, False):
@@ -62,11 +62,10 @@ def draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, highlighte
             x = white_index * WHITE_KEY_WIDTH
             if note_names[midi_note % 12] not in ['E', 'B']:
                 black_x = x + WHITE_KEY_WIDTH * 0.7
-                rect = pygame.Rect(black_x, 20, BLACK_KEY_WIDTH, BLACK_KEY_HEIGHT)
+                rect = pygame.Rect(black_x, PIANO_Y_OFFSET, BLACK_KEY_WIDTH, BLACK_KEY_HEIGHT)
                 color = BLACK_KEY_COLOR
-                # Highlight teaching notes in yellow for black keys
                 if (midi_note + 1) in highlighted_notes:
-                    color = (255, 255, 0)
+                    color = (200, 200, 0)
                 if pressed_keys.get(midi_note + 1, False):
                     if (midi_note + 1) in pressed_fade_keys:
                         elapsed = now - pressed_fade_keys[midi_note + 1]
@@ -86,3 +85,36 @@ def draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, highlighte
         color = PEDAL_ACTIVE_COLOR if pedals[pedal] else PEDAL_COLOR
         pygame.draw.rect(screen, color, rect, border_radius=PEDAL_CORNER_RADIUS)
         pygame.draw.rect(screen, (0, 0, 0), rect, 2, border_radius=PEDAL_CORNER_RADIUS)
+
+def draw_progress_bar(screen, progress, dims):
+    """Draws a modern horizontal progress bar at the top of the screen."""
+    import pygame.gfxdraw
+    screen_width = dims['SCREEN_WIDTH']
+    bar_height = 28
+    bar_margin = 24  # Increased margin for separation
+    bar_width = int(screen_width * 0.7)
+    x = int((screen_width - bar_width) / 2)
+    y = bar_margin
+
+    shadow_offset = 4
+    shadow_color = (0, 0, 0, 80)
+    shadow_surface = pygame.Surface((bar_width, bar_height), pygame.SRCALPHA)
+    pygame.draw.rect(shadow_surface, shadow_color, shadow_surface.get_rect(), border_radius=14)
+    screen.blit(shadow_surface, (x + shadow_offset, y + shadow_offset))
+
+    bg_color = (40, 40, 60, 180)
+    bg_surface = pygame.Surface((bar_width, bar_height), pygame.SRCALPHA)
+    pygame.draw.rect(bg_surface, bg_color, bg_surface.get_rect(), border_radius=14)
+    screen.blit(bg_surface, (x, y))
+
+    fill_width = int(bar_width * progress)
+    if fill_width > 0:
+        fill_surface = pygame.Surface((fill_width, bar_height), pygame.SRCALPHA)
+        pygame.draw.rect(fill_surface, (0, 200, 255), (0, 0, fill_width, bar_height), border_radius=14)
+        screen.blit(fill_surface, (x, y))
+
+    font = pygame.font.SysFont("Segoe UI", 22, bold=True)
+    percent = int(progress * 100)
+    text = font.render(f"{percent}%", True, (255, 255, 255) if progress < 0.49 else (0, 0, 0))
+    text_rect = text.get_rect(center=(screen_width // 2, y + bar_height // 2))
+    screen.blit(text, text_rect)

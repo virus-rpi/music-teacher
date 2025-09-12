@@ -1,7 +1,7 @@
 import pygame
 import mido
 import threading
-from visual import draw_piano
+from visual import draw_piano, draw_progress_bar
 from synth import Synth, PEDAL_CC
 from midi_teach import MidiTeacher
 
@@ -25,7 +25,8 @@ BLACK_KEY_HEIGHT = WHITE_KEY_HEIGHT * 0.65
 PEDAL_WIDTH = int(WHITE_KEY_WIDTH * 1.2)
 PEDAL_HEIGHT = int(WHITE_KEY_HEIGHT * 0.6)
 PEDAL_SPACING = int(WHITE_KEY_WIDTH * 0.2)
-PEDAL_Y = 20 + WHITE_KEY_HEIGHT + 30
+PIANO_Y_OFFSET = 24 + 28 + 16  # progress bar margin + bar height + extra spacing
+PEDAL_Y = PIANO_Y_OFFSET + WHITE_KEY_HEIGHT + 30
 
 pressed_keys = {}
 pressed_fade_keys = {}
@@ -46,7 +47,8 @@ dims = {
     'PEDAL_SPACING': PEDAL_SPACING,
     'PEDAL_Y': PEDAL_Y,
     'LOWEST_NOTE': LOWEST_NOTE,
-    'HIGHEST_NOTE': HIGHEST_NOTE
+    'HIGHEST_NOTE': HIGHEST_NOTE,
+    'PIANO_Y_OFFSET': PIANO_Y_OFFSET
 }
 
 synth = Synth(SOUNDFONT_PATH)
@@ -103,6 +105,7 @@ while running:
                 pressed_notes_set.clear()
     highlighted_notes = midi_teacher.get_next_notes() if teaching_mode else set()
     draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, highlighted_notes)
+    draw_progress_bar(screen, midi_teacher.get_progress(), dims) if teaching_mode else None
     pygame.display.flip()
     clock.tick(60)
 
