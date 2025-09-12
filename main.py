@@ -4,6 +4,7 @@ import threading
 from visual import draw_piano, draw_progress_bar
 from synth import Synth, PEDAL_CC
 from midi_teach import MidiTeacher
+from sheet_music import SheetMusicRenderer
 
 LOWEST_NOTE = 21   # A0
 HIGHEST_NOTE = 108 # C8
@@ -53,6 +54,7 @@ dims = {
 
 synth = Synth(SOUNDFONT_PATH)
 midi_teacher = MidiTeacher(MIDI_TEACH_PATH)
+sheet_music_renderer = SheetMusicRenderer(MIDI_TEACH_PATH, SCREEN_WIDTH)
 
 def midi_listener():
     try:
@@ -115,6 +117,7 @@ while running:
     highlighted_notes = midi_teacher.get_next_notes() if teaching_mode else set()
     draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, highlighted_notes)
     draw_progress_bar(screen, midi_teacher.get_progress(), dims) if teaching_mode else None
+    sheet_music_renderer.draw(screen, dims['PEDAL_Y'] + dims['PEDAL_HEIGHT'] + 32, midi_teacher.get_progress())
     pygame.display.flip()
     clock.tick(60)
 
