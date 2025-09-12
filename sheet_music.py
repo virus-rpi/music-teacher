@@ -34,6 +34,8 @@ _BARLINE_SMOOTH = 2           # smooth columns by this half-window
 _BG_GRAY = 20
 _BG_RGBA = (20, 20, 20, 255)
 
+_SPLIT_CACHE_VERSION = "v1"
+
 class SheetMusicRenderer:
     def __init__(self, midi_path, screen_width, height=260, debug=True):
         """
@@ -434,23 +436,57 @@ class SheetMusicRenderer:
             self._simple_fallback(None)
             return
 
-        # split every page into systems
+        # persistent cache for split systems
+        cache_dir = self._get_cache_dir()
+        cache_key = self._midi_cache_key()
+        systems_cache_dir = cache_dir / cache_key / f"systems_{_SPLIT_CACHE_VERSION}"
+        cached_system_paths = sorted(glob.glob(str(systems_cache_dir / "sys_*.png"))) if systems_cache_dir.exists() else []
+
         all_system_images = []
         page_system_counts = []
-        for f in files:
+
+        if cached_system_paths:
+            # Load cached split systems
             try:
-                systems = self._slice_page_into_system_images(f)
+                for p in cached_system_paths:
+                    im = Image.open(p).convert("RGBA")
+                    all_system_images.append(im)
                 if self.debug:
-                    print(f"page {f} -> {len(systems)} systems")
-                page_system_counts.append(len(systems))
-                all_system_images.extend(systems)
+                    print(f"Loaded {len(all_system_images)} split systems from cache")
             except Exception as e:
                 if self.debug:
-                    print("failed slicing page", f, ":", e)
-                # fallback: use entire page
-                fallback_im = Image.open(f).convert("RGBA")
-                all_system_images.append(self._recolor_to_dark_theme(fallback_im))
-                page_system_counts.append(1)
+                    print("Failed to load cached systems, will resplit:", e)
+                all_system_images = []
+
+        if not all_system_images:
+            # split every page into systems and save to cache
+            for f in files:
+                try:
+                    systems = self._slice_page_into_system_images(f)
+                    if self.debug:
+                        print(f"page {f} -> {len(systems)} systems")
+                    page_system_counts.append(len(systems))
+                    all_system_images.extend(systems)
+                except Exception as e:
+                    if self.debug:
+                        print("failed slicing page", f, ":", e)
+                    # fallback: use entire page
+                    fallback_im = Image.open(f).convert("RGBA")
+                    all_system_images.append(self._recolor_to_dark_theme(fallback_im))
+                    page_system_counts.append(1)
+
+            # save to systems cache
+            try:
+                systems_cache_dir.mkdir(parents=True, exist_ok=True)
+                for idx, im in enumerate(all_system_images):
+                    out_path = systems_cache_dir / f"sys_{idx:04d}.png"
+                    # Use lossless PNG to preserve quality
+                    im.save(out_path)
+                if self.debug:
+                    print(f"Saved {len(all_system_images)} split systems to cache: {systems_cache_dir}")
+            except Exception as e:
+                if self.debug:
+                    print("Warning: failed to save system cache:", e)
 
         if not all_system_images:
             raise RuntimeError("No system images were produced from MuseScore pages.")
