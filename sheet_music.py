@@ -8,18 +8,15 @@ import pygame
 from PIL import Image, ImageOps
 from music21 import converter, environment, note as m21note, stream as m21stream
 
-# Pillow resampling constant compatibility (Pillow 10 moved LANCZOS under Image.Resampling)
 try:
     RESAMPLE_LANCZOS = Image.Resampling.LANCZOS  # type: ignore[attr-defined]
-except Exception:  # pragma: no cover - fallback for older/newer Pillow
+except Exception:
     _resampling = getattr(Image, "Resampling", Image)
     RESAMPLE_LANCZOS = getattr(_resampling, "LANCZOS", getattr(_resampling, "BICUBIC", getattr(Image, "NEAREST", 0)))
 
-# tune these to detect whitespace between systems
 _WHITESPACE_THRESHOLD = 0.90  # fraction of white pixels in a row to be considered whitespace
 _MIN_SYSTEM_HEIGHT = 18       # ignore tiny slices
 _MORPH_BLUR = 3               # smooth projection to merge near whitespace gaps
-# New heuristics to avoid splitting treble/bass apart
 _MIN_SYSTEM_GAP_FRAC = 0.03   # minimum fraction of page height for a gap to be considered inter-system
 _GAP_PERCENTILE = 0.70        # percentile of whitespace gaps to classify as separators
 _MIN_PADDING = 24             # minimum vertical padding around detected system
@@ -37,7 +34,7 @@ _FP_SIZE = 24                 # downscaled square for fingerprint
 _FP_DIFF_THRESH = 0.14        # normalized diff threshold to consider two left regions the same
 
 class SheetMusicRenderer:
-    def __init__(self, midi_path, screen_width, height=260, debug=False):
+    def __init__(self, midi_path, screen_width, height=260, debug=True):
         """
         midi_path: path to midi file (music21 will parse it)
         screen_width: width in pixels of pygame window (used for view)
@@ -53,9 +50,6 @@ class SheetMusicRenderer:
         self.full_width = 0
         self.note_to_xs = {}  # midi -> list of x coords on the full strip (approx)
         self.system_boxes = []  # list of (x, w) for each system in order
-
-        # NEW: for detection of first barline and cropping of leading content
-        self._prev_clef_key_fp = None  # image-based fingerprint of left-of-barline region
 
         # do the heavy lifting now
         self._prepare_strip()
@@ -260,55 +254,16 @@ class SheetMusicRenderer:
                 return x
         return None
 
-    def _left_region_fingerprint(self, im: Image.Image, bar_x: int):
-        """Return a compact fingerprint (tuple of ints) of the left-of-barline region for similarity tests."""
-        w, h = im.size
-        if bar_x <= 0:
-            return None
-        fp_w = max(20, min(bar_x, int(w * _FP_WIDTH_FRAC)))
-        box = (max(0, bar_x - fp_w), 0, bar_x, h)
-        region = im.convert("L").crop(box)
-        region = ImageOps.autocontrast(region)
-        ds = region.resize((_FP_SIZE, _FP_SIZE))
-        data = list(ds.getdata())  # 0..255 ints
-        return tuple(data)
-
-    @staticmethod
-    def _fp_diff(a, b):
-        if not a or not b or len(a) != len(b):
-            return 1.0
-        # normalized mean absolute difference (0..1)
-        diffs = 0
-        n = len(a)
-        for i in range(n):
-            diffs += abs(a[i] - b[i])
-        return (diffs / 255.0) / n
-
     def _maybe_crop_leading_content(self, im: Image.Image):
         """
-        Crop leading instrument/clef/key up to first barline.
+        Crop leading instrument up to first barline.
         - Always crop on the very first encountered system (to remove instrument names).
-        - For subsequent systems, crop only if the left-of-barline fingerprint matches the previous one (clef/key unchanged).
         Returns (cropped_image, did_crop: bool).
         """
         bar_x = self._find_first_barline_x(im)
         if bar_x is None or bar_x <= 2:
             return im, False
-        fp = self._left_region_fingerprint(im, bar_x)
-        do_crop = False
-        if self._prev_clef_key_fp is None:
-            # first system: remove instrument block and initial clef/key
-            do_crop = True
-        else:
-            diff = self._fp_diff(fp, self._prev_clef_key_fp)
-            do_crop = diff <= _FP_DIFF_THRESH
-            if self.debug:
-                print(f"fp diff={diff:.3f} -> {'crop' if do_crop else 'keep'}")
-        # update previous fingerprint regardless (for detection of changes later)
-        self._prev_clef_key_fp = fp
-        if do_crop:
-            return im.crop((bar_x, 0, im.width, im.height)), True
-        return im, False
+        return im.crop((bar_x, 0, im.width, im.height)), True
 
     # ------------------------------
     # System slicing and cropping
