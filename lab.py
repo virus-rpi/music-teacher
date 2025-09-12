@@ -1,6 +1,7 @@
 import pygame
 import mido
 import threading
+import math
 
 # MIDI note range for piano (A0 to C8)
 LOWEST_NOTE = 21   # A0
@@ -12,7 +13,8 @@ WHITE_KEY_COLOR = (230, 230, 230)
 BLACK_KEY_COLOR = (40, 40, 40)
 BG_COLOR = (20, 20, 20)
 HIGHLIGHT_COLOR = (0, 200, 255)
-RELEASE_FADE_COLOR = (100, 100, 100)
+BLACK_KEY_HIGHLIGHT_COLOR = (0, 100, 180)
+FADE_DURATION = 1500  # milliseconds
 
 # Pygame init
 pygame.init()
@@ -32,6 +34,7 @@ KEY_CORNER_RADIUS = 6
 
 # Track pressed keys
 pressed_keys = {}
+pressed_fade_keys = {}
 
 # Note mapping
 note_names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
@@ -43,12 +46,14 @@ def note_name(note_number):
     octave = (note_number // 12) - 1
     return f"{note_names[note_number % 12]}{octave}"
 
+def interpolate_color(c1, c2, t):
+    return tuple(int(c1[i] + (c2[i] - c1[i]) * t) for i in range(3))
+
 def draw_piano():
     screen.fill(BG_COLOR)
-
+    now = pygame.time.get_ticks()
     white_key_rects = []
     black_key_rects = []
-
     white_index = 0
     for midi_note in range(LOWEST_NOTE, HIGHEST_NOTE + 1):
         if not is_black(midi_note):
@@ -56,12 +61,17 @@ def draw_piano():
             rect = pygame.Rect(x, 20, WHITE_KEY_WIDTH, WHITE_KEY_HEIGHT)
             color = WHITE_KEY_COLOR
             if pressed_keys.get(midi_note, False):
-                color = HIGHLIGHT_COLOR
+                if midi_note in pressed_fade_keys:
+                    elapsed = now - pressed_fade_keys[midi_note]
+                    if elapsed < FADE_DURATION:
+                        t = elapsed / FADE_DURATION
+                        color = interpolate_color(HIGHLIGHT_COLOR, WHITE_KEY_COLOR, t)
+                    else:
+                        del pressed_fade_keys[midi_note]
             pygame.draw.rect(screen, color, rect, border_radius=KEY_CORNER_RADIUS)
             pygame.draw.rect(screen, (0, 0, 0), rect, 1, border_radius=KEY_CORNER_RADIUS)
             white_key_rects.append((midi_note, rect))
             white_index += 1
-
     white_index = 0
     for midi_note in range(LOWEST_NOTE, HIGHEST_NOTE):
         if not is_black(midi_note):
@@ -72,7 +82,13 @@ def draw_piano():
                                    BLACK_KEY_WIDTH, BLACK_KEY_HEIGHT)
                 color = BLACK_KEY_COLOR
                 if pressed_keys.get(midi_note + 1, False):
-                    color = HIGHLIGHT_COLOR
+                    if (midi_note + 1) in pressed_fade_keys:
+                        elapsed = now - pressed_fade_keys[midi_note + 1]
+                        if elapsed < FADE_DURATION:
+                            t = elapsed / FADE_DURATION
+                            color = interpolate_color(BLACK_KEY_HIGHLIGHT_COLOR, BLACK_KEY_COLOR, t)
+                        else:
+                            del pressed_fade_keys[midi_note + 1]
                 pygame.draw.rect(screen, color, rect, border_radius=KEY_CORNER_RADIUS)
                 black_key_rects.append((midi_note + 1, rect))
             white_index += 1
@@ -84,13 +100,15 @@ def midi_listener():
     except IndexError:
         print("No MIDI input found.")
         return
-
     with mido.open_input(port_name) as inport:
         for msg in inport:
+            print(msg)
             if msg.type == "note_on" and msg.velocity > 0:
                 pressed_keys[msg.note] = True
-            elif msg.type in ("note_off", "note_on") and msg.velocity == 0:
+                pressed_fade_keys[msg.note] = pygame.time.get_ticks()
+            elif msg.type in ("note_off", "note_on"):
                 pressed_keys[msg.note] = False
+                pressed_fade_keys.pop(msg.note, None)
 
 midi_thread = threading.Thread(target=midi_listener, daemon=True)
 midi_thread.start()
@@ -101,7 +119,6 @@ while running:
         if event.type == pygame.QUIT or (
             event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
             running = False
-
     draw_piano()
     pygame.display.flip()
     clock.tick(60)
