@@ -1,14 +1,11 @@
 import pygame
 import mido
 import threading
-import math
 
-# MIDI note range for piano (A0 to C8)
 LOWEST_NOTE = 21   # A0
 HIGHEST_NOTE = 108 # C8
 TOTAL_KEYS = HIGHEST_NOTE - LOWEST_NOTE + 1
 
-# Colors
 WHITE_KEY_COLOR = (230, 230, 230)
 BLACK_KEY_COLOR = (40, 40, 40)
 BG_COLOR = (20, 20, 20)
@@ -16,7 +13,6 @@ HIGHLIGHT_COLOR = (0, 200, 255)
 BLACK_KEY_HIGHLIGHT_COLOR = (0, 100, 180)
 FADE_DURATION = 1500  # milliseconds
 
-# Pygame init
 pygame.init()
 info = pygame.display.Info()
 SCREEN_WIDTH, SCREEN_HEIGHT = info.current_w, info.current_h
@@ -25,19 +21,27 @@ pygame.display.set_caption("MIDI Piano Visualizer")
 
 clock = pygame.time.Clock()
 
-# Key size ratios
 WHITE_KEY_WIDTH = SCREEN_WIDTH / 52
 WHITE_KEY_HEIGHT = int(WHITE_KEY_WIDTH * 7)
 BLACK_KEY_WIDTH = WHITE_KEY_WIDTH * 0.6
 BLACK_KEY_HEIGHT = WHITE_KEY_HEIGHT * 0.65
 KEY_CORNER_RADIUS = 6
 
-# Track pressed keys
 pressed_keys = {}
 pressed_fade_keys = {}
 
-# Note mapping
 note_names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+
+pedals = {"soft": False, "sostenuto": False, "sustain": False}
+PEDAL_CC = {"sustain": 64, "sostenuto": 66, "soft": 67}
+PEDAL_LABELS = {"soft": "Soft", "sostenuto": "Sostenuto", "sustain": "Sustain"}
+PEDAL_COLOR = (180, 180, 180)
+PEDAL_ACTIVE_COLOR = (0, 200, 255)
+PEDAL_WIDTH = int(WHITE_KEY_WIDTH * 1.2)
+PEDAL_HEIGHT = int(WHITE_KEY_HEIGHT * 0.6)
+PEDAL_SPACING = int(WHITE_KEY_WIDTH * 0.2)
+PEDAL_CORNER_RADIUS = 12
+PEDAL_Y = 20 + WHITE_KEY_HEIGHT + 30
 
 def is_black(note_number):
     return note_names[note_number % 12].endswith("#")
@@ -92,6 +96,15 @@ def draw_piano():
                 pygame.draw.rect(screen, color, rect, border_radius=KEY_CORNER_RADIUS)
                 black_key_rects.append((midi_note + 1, rect))
             white_index += 1
+    pedal_names = ["soft", "sostenuto", "sustain"]
+    total_width = PEDAL_WIDTH * 3 + PEDAL_SPACING * 2
+    start_x = (SCREEN_WIDTH - total_width) // 2
+    for i, pedal in enumerate(pedal_names):
+        x = start_x + i * (PEDAL_WIDTH + PEDAL_SPACING)
+        rect = pygame.Rect(x, PEDAL_Y, PEDAL_WIDTH, PEDAL_HEIGHT)
+        color = PEDAL_ACTIVE_COLOR if pedals[pedal] else PEDAL_COLOR
+        pygame.draw.rect(screen, color, rect, border_radius=PEDAL_CORNER_RADIUS)
+        pygame.draw.rect(screen, (0, 0, 0), rect, 2, border_radius=PEDAL_CORNER_RADIUS)
 
 def midi_listener():
     try:
@@ -109,6 +122,10 @@ def midi_listener():
             elif msg.type in ("note_off", "note_on"):
                 pressed_keys[msg.note] = False
                 pressed_fade_keys.pop(msg.note, None)
+            elif msg.type == "control_change":
+                for pedal, cc in PEDAL_CC.items():
+                    if msg.control == cc:
+                        pedals[pedal] = msg.value >= 64
 
 midi_thread = threading.Thread(target=midi_listener, daemon=True)
 midi_thread.start()
