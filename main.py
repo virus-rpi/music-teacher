@@ -3,11 +3,13 @@ import mido
 import threading
 from visual import draw_piano
 from synth import Synth, PEDAL_CC
+from midi_teach import MidiTeacher
 
 LOWEST_NOTE = 21   # A0
 HIGHEST_NOTE = 108 # C8
 TOTAL_KEYS = HIGHEST_NOTE - LOWEST_NOTE + 1
 SOUNDFONT_PATH = "/home/u200b/Music/Sound fonts/GeneralUser-GS.sf2"
+MIDI_TEACH_PATH = "/home/u200b/Music/Credits Song For My Death.mid"
 
 pygame.init()
 info = pygame.display.Info()
@@ -29,6 +31,8 @@ pressed_keys = {}
 pressed_fade_keys = {}
 pedals = {"soft": False, "sostenuto": False, "sustain": False}
 synth_enabled = True
+teaching_mode = True  # Set to True to enable teaching mode
+pressed_notes_set = set()
 
 dims = {
     'SCREEN_WIDTH': SCREEN_WIDTH,
@@ -46,6 +50,7 @@ dims = {
 }
 
 synth = Synth(SOUNDFONT_PATH)
+midi_teacher = MidiTeacher(MIDI_TEACH_PATH)
 
 def midi_listener():
     try:
@@ -60,11 +65,15 @@ def midi_listener():
             if msg.type == "note_on" and msg.velocity > 0:
                 pressed_keys[msg.note] = True
                 pressed_fade_keys[msg.note] = pygame.time.get_ticks()
+                pressed_notes_set.add(msg.note)
                 if synth_enabled:
                     synth.note_on(msg.note, msg.velocity)
+                if teaching_mode:
+                    midi_teacher.advance_if_pressed(pressed_notes_set)
             elif msg.type in ("note_off", "note_on"):
                 pressed_keys[msg.note] = False
                 pressed_fade_keys.pop(msg.note, None)
+                pressed_notes_set.discard(msg.note)
                 if synth_enabled:
                     synth.note_off(msg.note)
             elif msg.type == "control_change":
@@ -87,10 +96,15 @@ while running:
             if event.key == pygame.K_s:
                 synth_enabled = not synth_enabled
                 print(f"Synth enabled: {synth_enabled}")
-    draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims)
+            if event.key == pygame.K_t:
+                teaching_mode = not teaching_mode
+                print(f"Teaching mode: {teaching_mode}")
+                midi_teacher.reset()
+                pressed_notes_set.clear()
+    highlighted_notes = midi_teacher.get_next_notes() if teaching_mode else set()
+    draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, highlighted_notes)
     pygame.display.flip()
     clock.tick(60)
 
 pygame.quit()
 synth.delete()
-

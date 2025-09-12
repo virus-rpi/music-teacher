@@ -1,4 +1,3 @@
-import sys
 import fluidsynth
 
 PEDAL_CC = {"sustain": 64, "sostenuto": 66, "soft": 67}

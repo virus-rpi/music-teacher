@@ -19,7 +19,9 @@ def is_black(note_number):
 def interpolate_color(c1, c2, t):
     return tuple(int(c1[i] + (c2[i] - c1[i]) * t) for i in range(3))
 
-def draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims):
+def draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, highlighted_notes=None):
+    if highlighted_notes is None:
+        highlighted_notes = set()
     screen_width, screen_height = dims['SCREEN_WIDTH'], dims['SCREEN_HEIGHT']
     WHITE_KEY_WIDTH = dims['WHITE_KEY_WIDTH']
     WHITE_KEY_HEIGHT = dims['WHITE_KEY_HEIGHT']
@@ -40,7 +42,10 @@ def draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims):
             x = white_index * WHITE_KEY_WIDTH
             rect = pygame.Rect(x, 20, WHITE_KEY_WIDTH, WHITE_KEY_HEIGHT)
             color = WHITE_KEY_COLOR
-            if pressed_keys.get(midi_note, False):
+            # Highlight teaching notes in yellow
+            if midi_note in highlighted_notes:
+                color = (255, 255, 0)
+            elif pressed_keys.get(midi_note, False):
                 if midi_note in pressed_fade_keys:
                     elapsed = now - pressed_fade_keys[midi_note]
                     if elapsed < FADE_DURATION:
@@ -59,6 +64,9 @@ def draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims):
                 black_x = x + WHITE_KEY_WIDTH * 0.7
                 rect = pygame.Rect(black_x, 20, BLACK_KEY_WIDTH, BLACK_KEY_HEIGHT)
                 color = BLACK_KEY_COLOR
+                # Highlight teaching notes in yellow for black keys
+                if (midi_note + 1) in highlighted_notes:
+                    color = (255, 255, 0)
                 if pressed_keys.get(midi_note + 1, False):
                     if (midi_note + 1) in pressed_fade_keys:
                         elapsed = now - pressed_fade_keys[midi_note + 1]
@@ -78,4 +86,3 @@ def draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims):
         color = PEDAL_ACTIVE_COLOR if pedals[pedal] else PEDAL_COLOR
         pygame.draw.rect(screen, color, rect, border_radius=PEDAL_CORNER_RADIUS)
         pygame.draw.rect(screen, (0, 0, 0), rect, 2, border_radius=PEDAL_CORNER_RADIUS)
-
