@@ -292,6 +292,20 @@ class SheetMusicRenderer:
     # ------------------------------
     # System slicing and cropping
     # ------------------------------
+    @staticmethod
+    def _has_full_barline(im: Image.Image, y_start, y_end):
+        """
+        Return True if there is a vertical dark line connecting the region from y_start to y_end.
+        """
+        gray = im.convert("L")
+        w, h = gray.size
+        px = gray.load()
+        for x in range(w):
+            dark_count = sum(1 for y in range(y_start, y_end) if px[x, y] < _DARK_THRESH)
+            if dark_count >= (y_end - y_start) * 0.9:  # at least 90% of rows are dark
+                return True
+        return False
+
     def _find_system_slices(self, im: Image.Image):
         w, h = im.size
         proj = self._horizontal_projection_grayscale(im)
@@ -321,39 +335,50 @@ class SheetMusicRenderer:
         if in_ws:
             whitespace_runs.append((ws_start, len(whitespace)))
 
-        # Compute gap sizes (ignore top/bottom margins for classification)
+        # Internal gaps for thresholding
         internal_gaps = []
         for s, e in whitespace_runs:
             if s == 0 or e == len(whitespace):
                 continue
             internal_gaps.append(e - s)
 
-        # If no internal gaps, treat whole page as one system
         if not internal_gaps:
             return [(0, h)]
 
-        # Set dynamic gap threshold: use percentile of gap sizes plus a minimal absolute threshold
+        # dynamic gap threshold
         gaps_sorted = sorted(internal_gaps)
         idx = max(0, min(len(gaps_sorted) - 1, int(len(gaps_sorted) * _GAP_PERCENTILE)))
         perc_thresh = gaps_sorted[idx]
         min_abs_gap = max(18, int(h * _MIN_SYSTEM_GAP_FRAC))
         gap_threshold = max(perc_thresh, min_abs_gap)
 
-        # Select whitespace runs that qualify as inter-system separators
-        separators = []  # (start, end)
+        # helper: check for full vertical barline in a region
+        def has_full_barline(y_start, y_end):
+            gray = im.convert("L")
+            px = gray.load()
+            for x in range(w):
+                dark_count = sum(1 for y in range(y_start, y_end) if px[x, y] < _DARK_THRESH)
+                if dark_count >= (y_end - y_start) * 0.9:  # 90% of rows dark
+                    return True
+            return False
+
+        # Select separators: large gaps that do NOT have a full vertical barline
+        separators = []
         for s, e in whitespace_runs:
             if s == 0 or e == len(whitespace):
                 continue
-            if (e - s) >= gap_threshold:
+            gap_size = e - s
+            if gap_size >= gap_threshold and not has_full_barline(s, e):
                 separators.append((s, e))
 
-        # If still nothing classified, fallback to the largest one
+        # fallback: if no separator, take largest gap that isn’t top/bottom
         if not separators:
-            largest = max(((e - s, (s, e)) for s, e in whitespace_runs if s != 0 and e != len(whitespace)), default=None)
+            largest = max(((e - s, (s, e)) for s, e in whitespace_runs if s != 0 and e != len(whitespace)),
+                          default=None)
             if largest:
                 separators = [largest[1]]
 
-        # Build segments between separators
+        # build segments between separators
         segments = []
         prev_end = 0
         for (s, e) in separators:
@@ -365,7 +390,7 @@ class SheetMusicRenderer:
         if (h - prev_end) >= _MIN_SYSTEM_HEIGHT:
             segments.append((prev_end, h))
 
-        # If we found nothing (margins different), fallback to splitting into 1 system (full page)
+        # fallback if nothing found
         if not segments:
             segments = [(0, h)]
 
@@ -622,30 +647,3 @@ class SheetMusicRenderer:
         # small border
         pygame.draw.rect(screen, (20,20,20), (0, y, view_w, self.strip_height), 2)
 
-
-# Example usage if run as a script (not executed when imported)
-if __name__ == "__main__":
-    import sys, time
-    pygame.init()
-    w, h = 1200, 300
-    screen = pygame.display.set_mode((w, h))
-    midi = sys.argv[1] if len(sys.argv) > 1 else None
-    if not midi:
-        print("usage: python sheet_music.py path/to/file.mid")
-        sys.exit(1)
-    r = SheetMusicRenderer(midi, w, height=200, debug=True)
-    clock = pygame.time.Clock()
-    prog = 0.0
-    running = True
-    while running:
-        for ev in pygame.event.get():
-            if ev.type == pygame.QUIT:
-                running = False
-        screen.fill((30,30,30))
-        r.draw(screen, 20, prog, highlight_pitches=[60,64])
-        pygame.display.flip()
-        prog += 0.002
-        if prog > 1.0:
-            prog = 0.0
-        clock.tick(60)
-    pygame.quit()
