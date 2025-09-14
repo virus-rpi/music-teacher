@@ -657,6 +657,24 @@ class SheetMusicRenderer:
             ignore_left_until = max(8, int(bar_x + max(6, int(0.8 * staff_space))))
         else:
             ignore_left_until = max(12, int(round(w * 0.075)))
+        px = np.asarray(gray)
+        dark_density = (px < _DARK_THRESH).mean(axis=1)
+        y_lo = int(h * 0.20)
+        y_hi = int(h * 0.88)
+        gap_mask = np.zeros(h, dtype=bool)
+        if y_hi > y_lo:
+            band = dark_density.copy()
+            thr_gap = float(min(0.06, np.percentile(band[y_lo:y_hi], 15))) if (y_hi - y_lo) > 5 else 0.04
+            gap_mask[y_lo:y_hi] = band[y_lo:y_hi] <= thr_gap
+        runs = self._find_runs(gap_mask)
+        treble_limit_y: Optional[int] = None
+        if runs:
+            longest = max(runs, key=lambda se: (se[1] - se[0]))
+            run_len = longest[1] - longest[0]
+            min_gap = max(8, int(0.35 * max(6, staff_space)))
+            if run_len >= min_gap:
+                treble_limit_y = int((longest[0] + longest[1]) // 2)
+
         s = max(6, staff_space)
         min_area = int(0.35 * s * s)
         max_area = int(7.0 * s * s)
@@ -664,6 +682,8 @@ class SheetMusicRenderer:
         xs: list[int] = []
         for c in comps:
             if c["maxx"] < ignore_left_until:
+                continue
+            if treble_limit_y is not None and c["cy"] >= treble_limit_y:
                 continue
             wbb = c["maxx"] - c["minx"] + 1
             hbb = c["maxy"] - c["miny"] + 1
@@ -802,9 +822,12 @@ class SheetMusicRenderer:
             return
         notes.sort(key=lambda x: x[0])
 
+        treble_notes = [(on, m) for (on, m) in notes if (m is not None and int(m) >= 60)]
+        used_notes = treble_notes if treble_notes else notes
+
         positions = list(self.notehead_xs) if self.notehead_xs else []
         self.note_to_xs = {}
-        for ((_, midi), x) in zip(notes, positions):
+        for ((_, midi), x) in zip(used_notes, positions):
             if midi is None:
                 continue
             self.note_to_xs.setdefault(int(midi), []).append(x)
