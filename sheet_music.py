@@ -48,6 +48,7 @@ class SheetMusicRenderer:
         self.note_to_xs: dict[int, list[int]] = {}
         self.system_boxes: list[tuple[int, int]] = []
         self.notehead_xs: list[int] = []
+        self._notehead_xs_per_system: list[list[int]] = []
 
         self._prepare_strip()
 
@@ -648,12 +649,22 @@ class SheetMusicRenderer:
         comps = self._connected_components(mask_no_stems)
         if not comps:
             return []
+        try:
+            bar_x = self._find_first_barline_x(im)
+        except Exception:
+            bar_x = None
+        if bar_x is not None and bar_x > 2:
+            ignore_left_until = max(8, int(bar_x + max(6, int(0.8 * staff_space))))
+        else:
+            ignore_left_until = max(12, int(round(w * 0.075)))
         s = max(6, staff_space)
         min_area = int(0.35 * s * s)
         max_area = int(7.0 * s * s)
         min_side = max(3, int(0.45 * s))
         xs: list[int] = []
         for c in comps:
+            if c["maxx"] < ignore_left_until:
+                continue
             wbb = c["maxx"] - c["minx"] + 1
             hbb = c["maxy"] - c["miny"] + 1
             area = c["area"]
@@ -757,9 +768,11 @@ class SheetMusicRenderer:
         orig_full_width = sum(w for _, w in self.system_boxes) or 1
         sx = self.full_width / orig_full_width
         self.notehead_xs = []
+        self._notehead_xs_per_system = []
         for sys_x, xs_local in per_system_note_xs:
-            for lx in xs_local:
-                self.notehead_xs.append(int((sys_x + lx) * sx))
+            scaled = [int((sys_x + lx) * sx) for lx in xs_local]
+            self._notehead_xs_per_system.append(scaled)
+            self.notehead_xs.extend(scaled)
         self.notehead_xs.sort()
         if self.debug:
             print(f"Detected {len(self.notehead_xs)} visual noteheads across strip")
@@ -788,43 +801,10 @@ class SheetMusicRenderer:
         if not notes:
             return
         notes.sort(key=lambda x: x[0])
-        total_notes = len(notes)
-        system_widths = [w for (_, w) in self.system_boxes]
-        total_sys_w = sum(system_widths) or 1
-        sys_note_counts = [max(1, int(round((w / total_sys_w) * total_notes))) for w in system_widths]
-        diff = sum(sys_note_counts) - total_notes
-        i = 0
-        while diff != 0:
-            if diff > 0:
-                if sys_note_counts[i] > 1:
-                    sys_note_counts[i] -= 1
-                    diff -= 1
-            else:
-                sys_note_counts[i] += 1
-                diff += 1
-            i = (i + 1) % len(sys_note_counts)
-        idx = 0
-        note_positions: list[int] = []
-        for sys_idx, cnt in enumerate(sys_note_counts):
-            sys_x, sys_w = self.system_boxes[sys_idx]
-            if sys_w <= 0:
-                sys_w = 1
-            for k in range(cnt):
-                if idx >= total_notes:
-                    break
-                frac = (k + 0.5) / max(1, cnt)
-                orig_full_width = sum(w for _, w in self.system_boxes)
-                if orig_full_width == 0:
-                    sx = 0
-                else:
-                    sx = self.full_width / orig_full_width
-                x_on_resized = int((sys_x + frac * sys_w) * sx)
-                note_positions.append(x_on_resized)
-                idx += 1
-            if idx >= total_notes:
-                break
+
+        positions = list(self.notehead_xs) if self.notehead_xs else []
         self.note_to_xs = {}
-        for ((_, midi), x) in zip(notes, note_positions):
+        for ((_, midi), x) in zip(notes, positions):
             if midi is None:
                 continue
             self.note_to_xs.setdefault(int(midi), []).append(x)
