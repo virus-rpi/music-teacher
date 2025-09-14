@@ -1,7 +1,7 @@
 [project]
-name = "piano-teacher"
+name = "music-teacher"
 version = "0.1.0"
-description = "Add your description here"
+description = "Program to help you learn to play a song on piano"
 requires-python = ">=3.13"
 dependencies = [
     "matplotlib>=3.10.6",
