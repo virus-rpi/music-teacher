@@ -2,7 +2,7 @@ import subprocess
 from pathlib import Path
 from svgelements import SVG, Group, Path as SVGPath, Shape, Matrix, Title, Desc
 import bisect
-from bisect import bisect_left, bisect_right
+import copy
 
 def run_musescore(midi_path: Path, svg_path: Path, mscore_cmd="mscore"):
     """
@@ -53,7 +53,7 @@ def looks_like_background(element: Shape) -> bool:
         return element.d().startswith("M0,0") or element.d().startswith("M0 0") or element.d().startswith("M 0,0") or element.d().startswith("M 0 0")
     return False
 
-def remove_unwanted_elements(element, remove_classes=("Page", "Tempo")):
+def remove_unwanted_elements(element, remove_classes=("Page", "Tempo", "MeasureNumber")):
     if isinstance(element, list):
         new_elements = []
         for e in element:
@@ -99,8 +99,9 @@ def merge_svgs_to_long_page(svg_paths):
     offset = 0
     for svg in svgs:
         for elem in list(svg.elements())[1:]:
-            apply_offset(elem, offset)
-            merged.append(elem)
+            elem_copy = copy.deepcopy(elem)
+            apply_offset(elem_copy, offset)
+            merged.append(elem_copy)
         offset += svg.height
 
     print("done.")
@@ -203,17 +204,13 @@ def group_by_bracket(svg: SVG):
 
     for i, b in enumerate(brackets):
         g = Group(id=f"Group-{i}")
-        g.append(b["elem"])
+        g.append(copy.deepcopy(b["elem"]))
         if b["members"]:
             members_with_x = list(zip(b["members"], b["members_x"]))
             members_with_x.sort(key=lambda mx: mx[1])
             for m, _x in members_with_x:
-                g.append(m)
+                g.append(copy.deepcopy(m))
         grouped_svg.append(g)
-
-    if unassigned:
-        raise Exception("Unassigned elements after grouping! That shouldn't happen.")
-
     print("done.")
     return grouped_svg
 
@@ -233,9 +230,9 @@ def group_by_measure(svg: SVG) -> SVG:
     for group in [g for g in list(svg.elements())[1:] if isinstance(g, Group)]:
         elems = list(group)
 
-        barlines = [e for e in elems if "BarLine" in getattr(e, "values", {}).get("class", "")]
+        bar_lines = [e for e in elems if "BarLine" in getattr(e, "values", {}).get("class", "")]
         bar_infos = []
-        for bl in barlines:
+        for bl in bar_lines:
             bb = bl.bbox()
             if not bb:
                 continue
@@ -293,6 +290,89 @@ def group_by_measure(svg: SVG) -> SVG:
     print("done.")
     return new_svg
 
+def strip_duplicate_clefs(svg: SVG) -> SVG:
+    print("Stripping duplicate clefs...", end="")
+    # TODO
+    print("done.")
+    return svg
+
+
+def bracket_groups_to_long_strip(svg: SVG) -> SVG:
+    print("Laying out bracket groups into one long strip...", end="")
+
+    groups = [g for g in list(svg.elements())[0] if isinstance(g, Group)]
+    if not groups:
+        print("done.")
+        return svg
+
+    def compute_bbox(elem):
+        bb = None
+        # if this element has a bbox, start with it
+        try:
+            own = elem.bbox()
+        except Exception:
+            own = None
+        if own:
+            bb = [own[0], own[1], own[2], own[3]]
+        # recurse into children if any
+        if hasattr(elem, 'elements'):
+            for child in list(elem.elements()):
+                cb = compute_bbox(child)
+                if cb:
+                    if bb is None:
+                        bb = [cb[0], cb[1], cb[2], cb[3]]
+                    else:
+                        bb[0] = min(bb[0], cb[0])
+                        bb[1] = min(bb[1], cb[1])
+                        bb[2] = max(bb[2], cb[2])
+                        bb[3] = max(bb[3], cb[3])
+        return tuple(bb) if bb is not None else None
+
+    group_copies = [copy.deepcopy(g) for g in groups]
+
+    bboxes = []
+    widths = []
+    heights = []
+    for g in group_copies:
+        bb = compute_bbox(g) or (0.0, 0.0, 0.0, 0.0)
+        minx, miny, maxx, maxy = bb
+        width = maxx - minx
+        height = maxy - miny
+        bboxes.append(bb)
+        widths.append(width)
+        heights.append(height)
+
+    total_width = sum(widths)
+    max_height = max(heights) if heights else 0.0
+
+    out = SVG()
+    out.width = total_width
+    out.height = max_height
+
+    current_x = 0.0
+    for g_copy, bb, w in zip(group_copies, bboxes, widths):
+        minx, miny, maxx, maxy = bb
+        dx = current_x - minx
+        dy = -miny
+
+        try:
+            g_copy *= Matrix.translate(dx, dy)
+            out.append(g_copy)
+        except Exception:
+            new_g = Group(id=g_copy.values.get('id'))
+            for elem in list(g_copy):
+                try:
+                    elem *= Matrix.translate(dx, dy)
+                except Exception:
+                    elem *= Matrix(1, 0, 0, 1, dx, dy)
+                new_g.append(elem)
+            out.append(new_g)
+
+        current_x += w
+
+    print("done.")
+    return out
+
 def midi_to_svg(midi_file: str, out_dir: str, mscore_cmd="mscore"):
     midi_path = Path(midi_file).resolve()
     out_dir = Path(out_dir).resolve()
@@ -317,6 +397,8 @@ def midi_to_svg(midi_file: str, out_dir: str, mscore_cmd="mscore"):
     merged = merge_svgs_to_long_page(fixed_paths)
     grouped = group_by_bracket(merged)
     grouped = group_by_measure(grouped)
+    stripped_clefs = strip_duplicate_clefs(grouped)
+    grouped = bracket_groups_to_long_strip(stripped_clefs)
 
     grouped_out = out_dir / (midi_path.stem + ".svg")
     grouped.write_xml(str(grouped_out))
