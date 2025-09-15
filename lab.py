@@ -16,7 +16,6 @@ def fix_svg_scaling(svg_in: Path, svg_out: Path):
     """
     svg = SVG().parse(str(svg_in))
     scale_factor = 65536.0
-    print(f"Applying scale factor ≈ {scale_factor:.1f}")
     for element in list(svg.elements())[1:]:
         if hasattr(element, "transform") and element.transform is not None:
             element.transform *= f"scale({scale_factor})"
@@ -105,12 +104,29 @@ def merge_svgs_to_long_page(svg_paths):
     print("done.")
     return merged
 
+def vertical_bbox_distance(a: Shape, b: Shape) -> float:
+    """Return the minimum Euclidean distance between two shapes' bounding boxes.
+    If boxes overlap, distance is 0. If either bbox is None return a large number.
+    """
+    ba = a.bbox()
+    bb = b.bbox()
+    if ba is None or bb is None:
+        return float("inf")
+    ax1, ay1, ax2, ay2 = ba[0], ba[1], ba[2], ba[3]
+    bx1, by1, bx2, by2 = bb[0], bb[1], bb[2], bb[3]
+
+    if ay2 < by1:
+        return by1 - ay2
+    elif by2 < ay1:
+        return ay1 - by2
+    else:
+        return 0.0
+
 def group_by_brackets(svg: SVG):
     """
     Group elements by bracket alignment using bounding boxes.
     """
     print("Grouping merged SVG by brackets...", end="")
-    groups = []
     brackets = []
 
     for elem in list(svg.elements())[1:]:
@@ -119,14 +135,32 @@ def group_by_brackets(svg: SVG):
             brackets.append({"elem": elem, "top": top, "bottom": bottom, "members": []})
     brackets.sort(key=lambda b: b["top"])
 
+    unassigned = []
+
     for elem in list(svg.elements())[1:]:
         if elem in (b["elem"] for b in brackets):
             continue
         top, bottom = find_top_and_bottom(elem)
+        assigned = False
         for b in brackets:
             if top >= b["top"] and bottom <= b["bottom"]:
                 b["members"].append(elem)
+                assigned = True
                 break
+        if not assigned:
+            unassigned.append(elem)
+
+    if brackets and unassigned:
+        for elem in unassigned:
+            best = None
+            best_dist = float("inf")
+            for b in brackets:
+                d = vertical_bbox_distance(elem, b["elem"])
+                if d < best_dist:
+                    best_dist = d
+                    best = b
+            if best is not None:
+                best["members"].append(elem)
 
     grouped_svg = SVG()
     grouped_svg.width = svg.width
@@ -139,9 +173,6 @@ def group_by_brackets(svg: SVG):
         for m in sorted_members:
             g.append(m)
         grouped_svg.append(g)
-
-    for e in groups:
-        grouped_svg.append(e)
 
     print("done.")
     return grouped_svg
