@@ -227,173 +227,167 @@ def replace_note(notes, old, new):
 
 def group_by_musical_semantics(svg: SVG):
     """
-    After bracket grouping, further group semantic music elements
-    (Notes with LedgerLines, Dots, Accidentals, Stems, Hooks, Beams, Ties).
+    After bracket grouping, further group semantic music elements.
+    Runs independently inside each bracket group to reduce search space.
     """
-    print("Grouping merged SVG by musical semantics...")
 
-    elements = list(svg.elements())[1:]
+    print("Grouping merged SVG by musical semantics (per bracket group)...")
 
-    def by_class(cls, elems=None):
-        elems = elems or elements
-        return [e for e in elems if cls in getattr(e, "values", {}).get("class", "")]
+    # Only process the bracket groups made by group_by_bracket
+    for group in [g for g in list(svg.elements())[1:] if isinstance(g, Group)]:
+        print("Processing bracket group:", group.values.get("id"))
+        elements = list(group)
 
-    # ---- INITIAL NOTES ----
-    notes = by_class("Note")
+        def by_class(cls, elems=None):
+            elems = elems or elements
+            return [e for e in elems if cls in getattr(e, "values", {}).get("class", "")]
 
-    # ======================
-    # 1. LedgerLines → Note
-    # ======================
-    ledgerlines = by_class("LedgerLine")
-    for ll in ledgerlines:
-        ll_bbox = ll.bbox()
-        if not ll_bbox:
+        # ---- INITIAL NOTES ----
+        notes = by_class("Note")
+        print(f"Found {len(notes)} notes")
+        if not notes:
             continue
-        cx = (ll_bbox[0] + ll_bbox[2]) / 2
-        cy = (ll_bbox[1] + ll_bbox[3]) / 2
-        nearest = min(notes, key=lambda n: (
-            abs(((n.bbox()[0]+n.bbox()[2])/2) - cx) +
-            abs(((n.bbox()[1]+n.bbox()[3])/2) - cy)
-        ))
-        g = make_group(f"NoteGroup-{id(nearest)}-ll", [nearest, ll])
-        svg.append(g)
-        notes = replace_note(notes, nearest, g)
 
-    print("LedgerLines grouped.")
+        # 1. LedgerLines → Note
+        ledgerlines = by_class("LedgerLine")
+        for ll in ledgerlines:
+            ll_bbox = ll.bbox()
+            if not ll_bbox:
+                continue
+            cx = (ll_bbox[0] + ll_bbox[2]) / 2
+            cy = (ll_bbox[1] + ll_bbox[3]) / 2
+            nearest = min(notes, key=lambda n: (
+                abs(((n.bbox()[0]+n.bbox()[2])/2) - cx) +
+                abs(((n.bbox()[1]+n.bbox()[3])/2) - cy)
+            ))
+            g = make_group(f"NoteGroup-{id(nearest)}-ll", [nearest, ll])
+            group.append(g)
+            notes = replace_note(notes, nearest, g)
 
-    # ===================
-    # 2. NoteDot → Note
-    # ===================
-    notedots = by_class("NoteDot")
-    for dot in notedots:
-        dbbox = dot.bbox()
-        if not dbbox:
-            continue
-        dx, dy = (dbbox[0]+dbbox[2])/2, (dbbox[1]+dbbox[3])/2
-        candidates = [n for n in notes if n.bbox() and (n.bbox()[2] < dx)]
-        if not candidates:
-            continue
-        nearest = min(candidates, key=lambda n: abs(((n.bbox()[1]+n.bbox()[3])/2)-dy))
-        g = make_group(f"NoteGroup-{id(nearest)}-dot", [nearest, dot])
-        svg.append(g)
-        notes = replace_note(notes, nearest, g)
+        print("Grouped ledger lines")
 
-    print("NoteDots grouped.")
+        # 2. NoteDot → Note
+        notedots = by_class("NoteDot")
+        for dot in notedots:
+            dbbox = dot.bbox()
+            if not dbbox:
+                continue
+            dx, dy = (dbbox[0]+dbbox[2])/2, (dbbox[1]+dbbox[3])/2
+            candidates = [n for n in notes if n.bbox() and (n.bbox()[2] < dx)]
+            if not candidates:
+                continue
+            nearest = min(candidates, key=lambda n: abs(((n.bbox()[1]+n.bbox()[3])/2)-dy))
+            g = make_group(f"NoteGroup-{id(nearest)}-dot", [nearest, dot])
+            group.append(g)
+            notes = replace_note(notes, nearest, g)
 
-    # ========================
-    # 3. Accidental → Note
-    # ========================
-    accidentals = by_class("Accidental")
-    for acc in accidentals:
-        abbox = acc.bbox()
-        if not abbox:
-            continue
-        ax, ay = (abbox[0]+abbox[2])/2, (abbox[1]+abbox[3])/2
-        candidates = [n for n in notes if n.bbox() and (n.bbox()[0] > ax)]
-        if not candidates:
-            continue
-        nearest = min(candidates, key=lambda n: abs(((n.bbox()[1]+n.bbox()[3])/2)-ay))
-        g = make_group(f"NoteGroup-{id(nearest)}-acc", [nearest, acc])
-        svg.append(g)
-        notes = replace_note(notes, nearest, g)
+        print("Grouped note dots")
 
-    print("Accidentals grouped.")
+        # 3. Accidental → Note
+        accidentals = by_class("Accidental")
+        for acc in accidentals:
+            abbox = acc.bbox()
+            if not abbox:
+                continue
+            ax, ay = (abbox[0]+abbox[2])/2, (abbox[1]+abbox[3])/2
+            candidates = [n for n in notes if n.bbox() and (n.bbox()[0] > ax)]
+            if not candidates:
+                continue
+            nearest = min(candidates, key=lambda n: abs(((n.bbox()[1]+n.bbox()[3])/2)-ay))
+            g = make_group(f"NoteGroup-{id(nearest)}-acc", [nearest, acc])
+            group.append(g)
+            notes = replace_note(notes, nearest, g)
 
-    # ===========================
-    # 4. Stems/Hooks → Note
-    # ===========================
-    stems = by_class("Stem") + by_class("Hook")
-    for s in stems:
-        sb = s.bbox()
-        if not sb:
-            continue
-        sx, sy = (sb[0]+sb[2])/2, (sb[1]+sb[3])/2
-        nearest = min(notes, key=lambda n: (
-            min(abs(n.bbox()[0]-sx), abs(n.bbox()[2]-sx)) +
-            abs(((n.bbox()[1]+n.bbox()[3])/2)-sy)
-        ))
-        g = make_group(f"NoteGroup-{id(nearest)}-stem", [nearest, s])
-        svg.append(g)
-        notes = replace_note(notes, nearest, g)
+        print("Grouped accidentals")
 
-    print("Stems/Hooks grouped.")
+        # 4. Stems/Hooks → Note
+        stems = by_class("Stem") + by_class("Hook")
+        for s in stems:
+            sb = s.bbox()
+            if not sb:
+                continue
+            sx, sy = (sb[0]+sb[2])/2, (sb[1]+sb[3])/2
+            nearest = min(notes, key=lambda n: (
+                min(abs(n.bbox()[0]-sx), abs(n.bbox()[2]-sx)) +
+                abs(((n.bbox()[1]+n.bbox()[3])/2)-sy)
+            ))
+            g = make_group(f"NoteGroup-{id(nearest)}-stem", [nearest, s])
+            group.append(g)
+            notes = replace_note(notes, nearest, g)
 
-    # ======================
-    # 5. Beams → StemGroups
-    # ======================
-    beams = by_class("Beam")
-    beam_groups = []
+        print("Grouped stems/hooks")
 
-    # First group overlapping beams
-    for beam in beams:
-        bb = beam.bbox()
-        if not bb:
-            continue
-        bx1, by1, bx2, by2 = bb
-        merged = False
+        # 5. Beams → StemGroups
+        beams = by_class("Beam")
+        beam_groups = []
+
+        for beam in beams:
+            bb = beam.bbox()
+            if not bb:
+                continue
+            bx1, by1, bx2, by2 = bb
+            merged = False
+            for bg in beam_groups:
+                gb = bg.bbox()
+                if not gb:
+                    continue
+                gx1, gy1, gx2, gy2 = gb
+                overlap_x = not (bx2 < gx1 or bx1 > gx2)
+                close_y = abs(((by1+by2)/2) - ((gy1+gy2)/2)) < (2 * (by2-by1))
+                if overlap_x and close_y:
+                    bg.append(beam)
+                    merged = True
+                    break
+            if not merged:
+                g = make_group(f"BeamGroup-{id(beam)}", [beam])
+                beam_groups.append(g)
+
+        print("Grouped beams")
+
         for bg in beam_groups:
-            gb = bg.bbox()
-            if not gb:
+            bb = bg.bbox()
+            if not bb:
                 continue
-            gx1, gy1, gx2, gy2 = gb
-            overlap_x = not (bx2 < gx1 or bx1 > gx2)
-            close_y = abs(((by1+by2)/2) - ((gy1+gy2)/2)) < (2 * (by2-by1))
-            if overlap_x and close_y:
-                bg.append(beam)
-                merged = True
-                break
-        if not merged:
-            g = make_group(f"BeamGroup-{id(beam)}", [beam])
-            beam_groups.append(g)
+            bx1, by1, bx2, by2 = bb
+            center_y = (by1+by2)/2
+            attached = []
+            for n in notes:
+                nb = n.bbox()
+                if not nb:
+                    continue
+                nx1, ny1, nx2, ny2 = nb
+                if nx1 < bx2 and nx2 > bx1 and abs(((ny1+ny2)/2) - center_y) < 3*(by2-by1):
+                    attached.append(n)
+            if attached:
+                g = make_group(f"BeamAttach-{id(bg)}", [bg] + attached)
+                group.append(g)
+                for a in attached:
+                    notes = replace_note(notes, a, g)
 
-    print("Beams grouped.")
+        print("Attached beams to notes")
 
-    # Attach beams to stem groups (notes already include stems)
-    for bg in beam_groups:
-        bb = bg.bbox()
-        if not bb:
-            continue
-        bx1, by1, bx2, by2 = bb
-        center_y = (by1+by2)/2
-        attached = []
-        for n in notes:
-            nb = n.bbox()
-            if not nb:
+        # 6. TieSegments → 2 Notes
+        ties = by_class("TieSegment")
+        for t in ties:
+            tb = t.bbox()
+            if not tb:
                 continue
-            nx1, ny1, nx2, ny2 = nb
-            if nx1 < bx2 and nx2 > bx1 and abs(((ny1 + ny2) / 2) - center_y) < 3*(by2 - by1):
-                attached.append(n)
-        if attached:
-            g = make_group(f"BeamAttach-{id(bg)}", [bg] + attached)
-            svg.append(g)
-            for a in attached:
-                notes = replace_note(notes, a, g)
+            cx = (tb[0]+tb[2])/2
+            left = min([n for n in notes if n.bbox() and n.bbox()[2] <= cx],
+                       key=lambda n: abs(n.bbox()[2]-cx), default=None)
+            right = min([n for n in notes if n.bbox() and n.bbox()[0] >= cx],
+                        key=lambda n: abs(n.bbox()[0]-cx), default=None)
+            members = [t] + [n for n in (left, right) if n]
+            if len(members) > 1:
+                g = make_group(f"TieGroup-{id(t)}", members)
+                group.append(g)
+                for m in (left, right):
+                    if m:
+                        notes = replace_note(notes, m, g)
 
-    print("Beams attached to notes.")
+        print("Grouped ties")
 
-    # =========================
-    # 6. TieSegments → 2 Notes
-    # =========================
-    ties = by_class("TieSegment")
-    for t in ties:
-        tb = t.bbox()
-        if not tb:
-            continue
-        cx = (tb[0]+tb[2])/2
-        left = min([n for n in notes if n.bbox() and n.bbox()[2] <= cx],
-                   key=lambda n: abs(n.bbox()[2]-cx), default=None)
-        right = min([n for n in notes if n.bbox() and n.bbox()[0] >= cx],
-                    key=lambda n: abs(n.bbox()[0]-cx), default=None)
-        members = [t] + [n for n in (left, right) if n]
-        if len(members) > 1:
-            g = make_group(f"TieGroup-{id(t)}", members)
-            svg.append(g)
-            for m in (left, right):
-                if m:
-                    notes = replace_note(notes, m, g)
-
-    print("Ties grouped.")
-
+    print("Semantic grouping done.")
     return svg
 
 def midi_to_svg(midi_file: str, out_dir: str, mscore_cmd="mscore"):
