@@ -105,7 +105,7 @@ def merge_svgs_to_long_page(svg_paths):
     print("done.")
     return merged
 
-def group(svg: SVG):
+def group_by_bracket(svg: SVG):
     """
     Group elements by bracket alignment using bounding boxes.
     """
@@ -239,7 +239,7 @@ def midi_to_svg(midi_file: str, out_dir: str, mscore_cmd="mscore"):
         fixed_paths.append(fixed)
 
     merged = merge_svgs_to_long_page(fixed_paths)
-    grouped = group(merged)
+    grouped = group_by_bracket(merged)
 
     grouped_out = out_dir / (midi_path.stem + ".svg")
     grouped.write_xml(str(grouped_out))
