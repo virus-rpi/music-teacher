@@ -216,6 +216,185 @@ def group_by_bracket(svg: SVG):
     print("done.")
     return grouped_svg
 
+def make_group(id_, elems):
+    g = Group(id=id_)
+    for e in elems:
+        g.append(e)
+    return g
+
+def replace_note(notes, old, new):
+    return [new if n == old else n for n in notes]
+
+def group_by_musical_semantics(svg: SVG):
+    """
+    After bracket grouping, further group semantic music elements
+    (Notes with LedgerLines, Dots, Accidentals, Stems, Hooks, Beams, Ties).
+    """
+    print("Grouping merged SVG by musical semantics...")
+
+    elements = list(svg.elements())[1:]
+
+    def by_class(cls, elems=None):
+        elems = elems or elements
+        return [e for e in elems if cls in getattr(e, "values", {}).get("class", "")]
+
+    # ---- INITIAL NOTES ----
+    notes = by_class("Note")
+
+    # ======================
+    # 1. LedgerLines → Note
+    # ======================
+    ledgerlines = by_class("LedgerLine")
+    for ll in ledgerlines:
+        ll_bbox = ll.bbox()
+        if not ll_bbox:
+            continue
+        cx = (ll_bbox[0] + ll_bbox[2]) / 2
+        cy = (ll_bbox[1] + ll_bbox[3]) / 2
+        nearest = min(notes, key=lambda n: (
+            abs(((n.bbox()[0]+n.bbox()[2])/2) - cx) +
+            abs(((n.bbox()[1]+n.bbox()[3])/2) - cy)
+        ))
+        g = make_group(f"NoteGroup-{id(nearest)}-ll", [nearest, ll])
+        svg.append(g)
+        notes = replace_note(notes, nearest, g)
+
+    print("LedgerLines grouped.")
+
+    # ===================
+    # 2. NoteDot → Note
+    # ===================
+    notedots = by_class("NoteDot")
+    for dot in notedots:
+        dbbox = dot.bbox()
+        if not dbbox:
+            continue
+        dx, dy = (dbbox[0]+dbbox[2])/2, (dbbox[1]+dbbox[3])/2
+        candidates = [n for n in notes if n.bbox() and (n.bbox()[2] < dx)]
+        if not candidates:
+            continue
+        nearest = min(candidates, key=lambda n: abs(((n.bbox()[1]+n.bbox()[3])/2)-dy))
+        g = make_group(f"NoteGroup-{id(nearest)}-dot", [nearest, dot])
+        svg.append(g)
+        notes = replace_note(notes, nearest, g)
+
+    print("NoteDots grouped.")
+
+    # ========================
+    # 3. Accidental → Note
+    # ========================
+    accidentals = by_class("Accidental")
+    for acc in accidentals:
+        abbox = acc.bbox()
+        if not abbox:
+            continue
+        ax, ay = (abbox[0]+abbox[2])/2, (abbox[1]+abbox[3])/2
+        candidates = [n for n in notes if n.bbox() and (n.bbox()[0] > ax)]
+        if not candidates:
+            continue
+        nearest = min(candidates, key=lambda n: abs(((n.bbox()[1]+n.bbox()[3])/2)-ay))
+        g = make_group(f"NoteGroup-{id(nearest)}-acc", [nearest, acc])
+        svg.append(g)
+        notes = replace_note(notes, nearest, g)
+
+    print("Accidentals grouped.")
+
+    # ===========================
+    # 4. Stems/Hooks → Note
+    # ===========================
+    stems = by_class("Stem") + by_class("Hook")
+    for s in stems:
+        sb = s.bbox()
+        if not sb:
+            continue
+        sx, sy = (sb[0]+sb[2])/2, (sb[1]+sb[3])/2
+        nearest = min(notes, key=lambda n: (
+            min(abs(n.bbox()[0]-sx), abs(n.bbox()[2]-sx)) +
+            abs(((n.bbox()[1]+n.bbox()[3])/2)-sy)
+        ))
+        g = make_group(f"NoteGroup-{id(nearest)}-stem", [nearest, s])
+        svg.append(g)
+        notes = replace_note(notes, nearest, g)
+
+    print("Stems/Hooks grouped.")
+
+    # ======================
+    # 5. Beams → StemGroups
+    # ======================
+    beams = by_class("Beam")
+    beam_groups = []
+
+    # First group overlapping beams
+    for beam in beams:
+        bb = beam.bbox()
+        if not bb:
+            continue
+        bx1, by1, bx2, by2 = bb
+        merged = False
+        for bg in beam_groups:
+            gb = bg.bbox()
+            if not gb:
+                continue
+            gx1, gy1, gx2, gy2 = gb
+            overlap_x = not (bx2 < gx1 or bx1 > gx2)
+            close_y = abs(((by1+by2)/2) - ((gy1+gy2)/2)) < (2 * (by2-by1))
+            if overlap_x and close_y:
+                bg.append(beam)
+                merged = True
+                break
+        if not merged:
+            g = make_group(f"BeamGroup-{id(beam)}", [beam])
+            beam_groups.append(g)
+
+    print("Beams grouped.")
+
+    # Attach beams to stem groups (notes already include stems)
+    for bg in beam_groups:
+        bb = bg.bbox()
+        if not bb:
+            continue
+        bx1, by1, bx2, by2 = bb
+        center_y = (by1+by2)/2
+        attached = []
+        for n in notes:
+            nb = n.bbox()
+            if not nb:
+                continue
+            nx1, ny1, nx2, ny2 = nb
+            if nx1 < bx2 and nx2 > bx1 and abs(((ny1 + ny2) / 2) - center_y) < 3*(by2 - by1):
+                attached.append(n)
+        if attached:
+            g = make_group(f"BeamAttach-{id(bg)}", [bg] + attached)
+            svg.append(g)
+            for a in attached:
+                notes = replace_note(notes, a, g)
+
+    print("Beams attached to notes.")
+
+    # =========================
+    # 6. TieSegments → 2 Notes
+    # =========================
+    ties = by_class("TieSegment")
+    for t in ties:
+        tb = t.bbox()
+        if not tb:
+            continue
+        cx = (tb[0]+tb[2])/2
+        left = min([n for n in notes if n.bbox() and n.bbox()[2] <= cx],
+                   key=lambda n: abs(n.bbox()[2]-cx), default=None)
+        right = min([n for n in notes if n.bbox() and n.bbox()[0] >= cx],
+                    key=lambda n: abs(n.bbox()[0]-cx), default=None)
+        members = [t] + [n for n in (left, right) if n]
+        if len(members) > 1:
+            g = make_group(f"TieGroup-{id(t)}", members)
+            svg.append(g)
+            for m in (left, right):
+                if m:
+                    notes = replace_note(notes, m, g)
+
+    print("Ties grouped.")
+
+    return svg
 
 def midi_to_svg(midi_file: str, out_dir: str, mscore_cmd="mscore"):
     midi_path = Path(midi_file).resolve()
@@ -240,6 +419,7 @@ def midi_to_svg(midi_file: str, out_dir: str, mscore_cmd="mscore"):
 
     merged = merge_svgs_to_long_page(fixed_paths)
     grouped = group_by_bracket(merged)
+    grouped = group_by_musical_semantics(grouped)
 
     grouped_out = out_dir / (midi_path.stem + ".svg")
     grouped.write_xml(str(grouped_out))
@@ -249,7 +429,6 @@ def midi_to_svg(midi_file: str, out_dir: str, mscore_cmd="mscore"):
             p.unlink()
 
     print(f"Done. Final merged SVG: {grouped_out}")
-
 
 if __name__ == "__main__":
     midi_to_svg(
