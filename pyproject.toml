@@ -11,4 +11,5 @@ dependencies = [
     "pygame>=2.6.1",
     "python-rtmidi==1.5.8",
     "setuptools>=80.9.0",
+    "svgelements>=1.9.6",
 ]
