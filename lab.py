@@ -77,7 +77,7 @@ def apply_offset(element, offset):
     else:
         element *= Matrix.translate_y(offset)
         if hasattr(element, 'elements'):
-            apply_offset(list(element.elements())[:1], offset)
+            apply_offset(list(element.elements()), offset)
 
 def merge_svgs_to_long_page(svg_paths):
     """
@@ -355,19 +355,10 @@ def bracket_groups_to_long_strip(svg: SVG) -> SVG:
         dx = current_x - minx
         dy = -miny
 
-        try:
-            g_copy *= Matrix.translate(dx, dy)
-            out.append(g_copy)
-        except Exception:
-            new_g = Group(id=g_copy.values.get('id'))
-            for elem in list(g_copy):
-                try:
-                    elem *= Matrix.translate(dx, dy)
-                except Exception:
-                    elem *= Matrix(1, 0, 0, 1, dx, dy)
-                new_g.append(elem)
-            out.append(new_g)
-
+        g_copy *= Matrix.translate(dx, dy)
+        for bar_line in [g for g in g_copy[0] if g.values["class"] == "BarLine"][2:-2]:
+            bar_line *= Matrix.translate_y(-dy/2)
+        out.append(g_copy)
         current_x += w
 
     print("done.")
