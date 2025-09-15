@@ -1,6 +1,7 @@
 import subprocess
 from pathlib import Path
 from svgelements import SVG, Group, Path as SVGPath, Shape, Matrix, Title, Desc
+import bisect
 
 def run_musescore(midi_path: Path, svg_path: Path, mscore_cmd="mscore"):
     """
@@ -104,63 +105,96 @@ def merge_svgs_to_long_page(svg_paths):
     print("done.")
     return merged
 
-def vertical_bbox_distance(a: Shape, b: Shape) -> float:
-    """Return the minimum Euclidean distance between two shapes' bounding boxes.
-    If boxes overlap, distance is 0. If either bbox is None return a large number.
-    """
-    ba = a.bbox()
-    bb = b.bbox()
-    if ba is None or bb is None:
-        return float("inf")
-    ax1, ay1, ax2, ay2 = ba[0], ba[1], ba[2], ba[3]
-    bx1, by1, bx2, by2 = bb[0], bb[1], bb[2], bb[3]
-
-    if ay2 < by1:
-        return by1 - ay2
-    elif by2 < ay1:
-        return ay1 - by2
-    else:
-        return 0.0
-
-def group_by_brackets(svg: SVG):
+def group(svg: SVG):
     """
     Group elements by bracket alignment using bounding boxes.
     """
     print("Grouping merged SVG by brackets...", end="")
-    brackets = []
 
-    for elem in list(svg.elements())[1:]:
-        if "Bracket" in getattr(elem, "values", {}).get("class", ""):
-            top, bottom = find_top_and_bottom(elem)
-            brackets.append({"elem": elem, "top": top, "bottom": bottom, "members": []})
-    brackets.sort(key=lambda b: b["top"])
+    elements = list(svg.elements())[1:]
+    if not elements:
+        print("done.")
+        return svg
+
+    cached = []
+    for elem in elements:
+        bbox = elem.bbox()
+        if bbox is None:
+            left = right = top = bottom = 0.0
+        else:
+            left, top, right, bottom = bbox[0], bbox[1], bbox[2], bbox[3]
+        center = (top + bottom) / 2.0
+        x_center = (left + right) / 2.0
+        cached.append({
+            "elem": elem,
+            "bbox": bbox,
+            "top": top,
+            "bottom": bottom,
+            "center": center,
+            "x": x_center,
+        })
+
+    brackets = [c.copy() for c in cached if "Bracket" in getattr(c["elem"], "values", {}).get("class", "")]
+
+    if not brackets:
+        print("done.")
+        return svg
+
+    brackets.sort(key=lambda b: b["center"])  # in-place
+    bracket_centers = [b["center"] for b in brackets]
+    for b in brackets:
+        b["members"] = []
+        b["members_x"] = []
+
+    bracket_elems = [b["elem"] for b in brackets]
+
+    def vdist(ba_bbox, bb_bbox):
+        if ba_bbox is None or bb_bbox is None:
+            return float("inf")
+        ax1, ay1, ax2, ay2 = ba_bbox[0], ba_bbox[1], ba_bbox[2], ba_bbox[3]
+        bx1, by1, bx2, by2 = bb_bbox[0], bb_bbox[1], bb_bbox[2], bb_bbox[3]
+        if ay2 < by1:
+            return by1 - ay2
+        elif by2 < ay1:
+            return ay1 - by2
+        else:
+            return 0.0
 
     unassigned = []
-
-    for elem in list(svg.elements())[1:]:
-        if elem in (b["elem"] for b in brackets):
+    for c in cached:
+        elem = c["elem"]
+        if elem in bracket_elems:
             continue
-        top, bottom = find_top_and_bottom(elem)
+        top = c["top"]
+        bottom = c["bottom"]
+        bbox = c["bbox"]
+        center = c["center"]
+        x = c["x"]
         assigned = False
         for b in brackets:
             if top >= b["top"] and bottom <= b["bottom"]:
                 b["members"].append(elem)
+                b["members_x"].append(x)
                 assigned = True
                 break
-        if not assigned:
-            unassigned.append(elem)
-
-    if brackets and unassigned:
-        for elem in unassigned:
-            best = None
-            best_dist = float("inf")
-            for b in brackets:
-                d = vertical_bbox_distance(elem, b["elem"])
-                if d < best_dist:
-                    best_dist = d
-                    best = b
-            if best is not None:
-                best["members"].append(elem)
+        if assigned:
+            continue
+        idx = bisect.bisect_left(bracket_centers, center)
+        best = None
+        best_dist = float("inf")
+        left_idx = max(0, idx - 3)
+        right_idx = min(len(brackets), idx + 4)
+        for j in range(left_idx, right_idx):
+            b = brackets[j]
+            d = vdist(bbox, b["bbox"])
+            if d < best_dist:
+                best_dist = d
+                best = b
+        if best is not None:
+            best["members"].append(elem)
+            best["members_x"].append(x)
+        else:
+            unassigned.append((elem, x))
 
     grouped_svg = SVG()
     grouped_svg.width = svg.width
@@ -169,10 +203,15 @@ def group_by_brackets(svg: SVG):
     for i, b in enumerate(brackets):
         g = Group(id=f"Group-{i}")
         g.append(b["elem"])
-        sorted_members = sorted(b["members"], key=find_x_coordinate)
-        for m in sorted_members:
-            g.append(m)
+        if b["members"]:
+            members_with_x = list(zip(b["members"], b["members_x"]))
+            members_with_x.sort(key=lambda mx: mx[1])
+            for m, _x in members_with_x:
+                g.append(m)
         grouped_svg.append(g)
+
+    if unassigned:
+        raise Exception("Unassigned elements after grouping! That shouldn't happen.")
 
     print("done.")
     return grouped_svg
@@ -200,7 +239,7 @@ def midi_to_svg(midi_file: str, out_dir: str, mscore_cmd="mscore"):
         fixed_paths.append(fixed)
 
     merged = merge_svgs_to_long_page(fixed_paths)
-    grouped = group_by_brackets(merged)
+    grouped = group(merged)
 
     grouped_out = out_dir / (midi_path.stem + ".svg")
     grouped.write_xml(str(grouped_out))
