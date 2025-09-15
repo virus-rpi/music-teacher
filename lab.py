@@ -217,188 +217,81 @@ def group_by_bracket(svg: SVG):
     print("done.")
     return grouped_svg
 
-def make_group(id_, elems):
-    g = Group(id=id_)
-    for e in elems:
-        g.append(e)
-    return g
-
-def replace_note(notes, old, new):
-    return [new if n == old else n for n in notes]
-
-def group_by_musical_semantics(svg: SVG):
+def group_by_measure(svg: SVG) -> SVG:
     """
-    After bracket grouping, further group semantic music elements.
-    Runs independently inside each bracket group to reduce search space.
+    Split each bracket group into measures based on BarLine elements.
+    Each measure becomes a <Group id="...-Measure-n"> with:
+      - StaffLines inside their own <Group>
+      - Other elements grouped normally, sorted by x
     """
+    print("Grouping by measures...", end="")
 
-    print("Grouping merged SVG by musical semantics (per bracket group)...")
+    new_svg = SVG()
+    new_svg.width = svg.width
+    new_svg.height = svg.height
 
     for group in [g for g in list(svg.elements())[1:] if isinstance(g, Group)]:
-        print("Processing bracket group:", group.values.get("id"))
-        elements = list(group)
+        elems = list(group)
 
-        def by_class(cls, elems=None):
-            elems = elems or elements
-            return [e for e in elems if cls in getattr(e, "values", {}).get("class", "")]
-
-        # ---- INITIAL NOTES ----
-        notes = by_class("Note")
-        print(f"Found {len(notes)} notes")
-        if not notes:
-            continue
-
-        def note_info(n):
-            bb = n.bbox()
+        barlines = [e for e in elems if "BarLine" in getattr(e, "values", {}).get("class", "")]
+        bar_infos = []
+        for bl in barlines:
+            bb = bl.bbox()
             if not bb:
-                return None
+                continue
             x = (bb[0] + bb[2]) / 2
-            y = (bb[1] + bb[3]) / 2
-            return {"note": n, "x": x, "y": y, "bbox": bb}
+            bar_infos.append((x, bl))
+        bar_infos.sort(key=lambda b: b[0])
 
-        note_infos = [note_info(n) for n in notes if note_info(n)]
-        note_infos.sort(key=lambda i: i["x"])
-        note_xs = [i["x"] for i in note_infos]
+        bar_positions = []
+        current_x = None
+        cluster = []
+        for x, bl in bar_infos:
+            if current_x is None or abs(x - current_x) < 1.0:
+                cluster.append(bl)
+                current_x = x
+            else:
+                bar_positions.append((current_x, cluster))
+                cluster = [bl]
+                current_x = x
+        if cluster:
+            bar_positions.append((current_x, cluster))
 
-        def nearest_by_x(cx, cy=None, max_dist=50):
-            """Find nearest note to cx (and optionally cy)."""
-            idx = bisect_left(note_xs, cx)
-            best, best_d = None, float("inf")
-            for j in range(max(0, idx-5), min(len(note_infos), idx+6)):
-                i = note_infos[j]
-                dx = abs(i["x"] - cx)
-                if dx > max_dist:
+        measures = []
+        scaffolding = Group(id=f"{group.values.get('id')}-Scaffolding")
+        for i in range(len(bar_positions) - 1):
+            x_start = bar_positions[i][0]
+            x_end = bar_positions[i+1][0]
+
+            content = []
+
+            for e in elems:
+                bb = e.bbox()
+                if not bb:
                     continue
-                d = dx if cy is None else dx + abs(i["y"] - cy)
-                if d < best_d:
-                    best, best_d = i, d
-            return best["note"] if best else None
+                ex = (bb[0] + bb[2]) / 2
+                if x_start <= ex <= x_end:
+                    if "StaffLine" in getattr(e, "values", {}).get("class", ""):
+                        scaffolding.append(e)
+                    elif "BarLine" in getattr(e, "values", {}).get("class", ""):
+                        scaffolding.append(e)
+                    else:
+                        content.append(e)
 
-        # ---- 1. LedgerLines → Note ----
-        for ll in by_class("LedgerLine"):
-            bb = ll.bbox()
-            if not bb:
-                continue
-            cx = (bb[0] + bb[2]) / 2
-            cy = (bb[1] + bb[3]) / 2
-            nearest = nearest_by_x(cx, cy)
-            if nearest:
-                g = make_group(f"NoteGroup-{id(nearest)}-ll", [nearest, ll])
-                group.append(g)
-                notes = replace_note(notes, nearest, g)
-                note_infos = [note_info(n) for n in notes if note_info(n)]
-                note_infos.sort(key=lambda i: i["x"])
-                note_xs = [i["x"] for i in note_infos]
-        print(f"Processed {len(by_class('LedgerLine'))} ledger lines")
+            content.sort(key=lambda e: (e.bbox()[0] if e.bbox() else 0))
 
-        # ---- 2. NoteDot → Note ----
-        for dot in by_class("NoteDot"):
-            bb = dot.bbox()
-            if not bb:
-                continue
-            dx, dy = (bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2
-            idx = bisect_left(note_xs, dx)
-            candidates = note_infos[:idx]  # only notes left of the dot
-            if not candidates:
-                continue
-            nearest = min(candidates, key=lambda i: abs(i["y"] - dy))
-            g = make_group(f"NoteGroup-{id(nearest['note'])}-dot", [nearest["note"], dot])
-            group.append(g)
-            notes = replace_note(notes, nearest["note"], g)
-            note_infos = [note_info(n) for n in notes if note_info(n)]
-            note_infos.sort(key=lambda i: i["x"])
-            note_xs = [i["x"] for i in note_infos]
+            measure_group = Group(id=f"{group.values.get('id')}-Measure-{i}")
+            for c in content:
+                measure_group.append(c)
+            measures.append(measure_group)
+        new_group = Group(id=group.values.get("id"))
+        new_group.append(scaffolding)
+        for m in measures:
+            new_group.append(m)
+        new_svg.append(new_group)
 
-        print(f"Processed {len(by_class('NoteDot'))} note dots")
-
-        # ---- 3. Accidental → Note ----
-        for acc in by_class("Accidental"):
-            bb = acc.bbox()
-            if not bb:
-                continue
-            ax, ay = (bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2
-            idx = bisect_right(note_xs, ax)
-            candidates = note_infos[idx:]  # only notes right of accidental
-            if not candidates:
-                continue
-            nearest = min(candidates, key=lambda i: abs(i["y"] - ay))
-            g = make_group(f"NoteGroup-{id(nearest['note'])}-acc", [nearest["note"], acc])
-            group.append(g)
-            notes = replace_note(notes, nearest["note"], g)
-            note_infos = [note_info(n) for n in notes if note_info(n)]
-            note_infos.sort(key=lambda i: i["x"])
-            note_xs = [i["x"] for i in note_infos]
-
-        print(f"Processed {len(by_class('Accidental'))} accidentals")
-
-        # ---- 4. Stems/Hooks → Note ----
-        for s in by_class("Stem") + by_class("Hook"):
-            sb = s.bbox()
-            if not sb:
-                continue
-            sx, sy = (sb[0] + sb[2]) / 2, (sb[1] + sb[3]) / 2
-            nearest = nearest_by_x(sx, sy)
-            if nearest:
-                g = make_group(f"NoteGroup-{id(nearest)}-stem", [nearest, s])
-                group.append(g)
-                notes = replace_note(notes, nearest, g)
-                note_infos = [note_info(n) for n in notes if note_info(n)]
-                note_infos.sort(key=lambda i: i["x"])
-                note_xs = [i["x"] for i in note_infos]
-
-        print(f"Processed {len(by_class('Stem')) + len(by_class('Hook'))} stems/hooks")
-
-        # ---- 5. Beams → StemGroups ----
-        beams = by_class("Beam")
-        beams.sort(key=lambda b: b.bbox()[0] if b.bbox() else 0)
-        for beam in beams:
-            bb = beam.bbox()
-            if not bb:
-                continue
-            bx1, by1, bx2, by2 = bb
-            center_y = (by1 + by2) / 2
-            idx1 = bisect_left(note_xs, bx1)
-            idx2 = bisect_right(note_xs, bx2)
-            candidates = note_infos[idx1:idx2]
-            attached = [c["note"] for c in candidates if abs(c["y"] - center_y) < (3*(by2-by1))]
-            if attached:
-                g = make_group(f"BeamAttach-{id(beam)}", [beam] + attached)
-                group.append(g)
-                for a in attached:
-                    notes = replace_note(notes, a, g)
-                note_infos = [note_info(n) for n in notes if note_info(n)]
-                note_infos.sort(key=lambda i: i["x"])
-                note_xs = [i["x"] for i in note_infos]
-
-        print(f"Processed {len(beams)} beams")
-
-        # ---- 6. TieSegments → 2 Notes ----
-        for t in by_class("TieSegment"):
-            tb = t.bbox()
-            if not tb:
-                continue
-            cx = (tb[0] + tb[2]) / 2
-            left_idx = bisect_left(note_xs, cx)
-            left = note_infos[left_idx-1]["note"] if left_idx > 0 else None
-            right = note_infos[left_idx]["note"] if left_idx < len(note_infos) else None
-            members = [t] + [n for n in (left, right) if n]
-            if len(members) > 1:
-                g = make_group(f"TieGroup-{id(t)}", members)
-                group.append(g)
-                for m in (left, right):
-                    if m:
-                        notes = replace_note(notes, m, g)
-                note_infos = [note_info(n) for n in notes if note_info(n)]
-                note_infos.sort(key=lambda i: i["x"])
-                note_xs = [i["x"] for i in note_infos]
-
-        print(f"Processed {len(by_class('TieSegment'))} tie segments")
-        svg.write_xml(Path("./test/").resolve() / (Path("/home/u200b/Music/Credits Song For My Death.mid").resolve().stem + ".svg"))
-
-        print("Finished group", group.values.get("id"))
-
-    print("Semantic grouping done.")
-    return svg
+    print("done.")
+    return new_svg
 
 def midi_to_svg(midi_file: str, out_dir: str, mscore_cmd="mscore"):
     midi_path = Path(midi_file).resolve()
@@ -423,7 +316,7 @@ def midi_to_svg(midi_file: str, out_dir: str, mscore_cmd="mscore"):
 
     merged = merge_svgs_to_long_page(fixed_paths)
     grouped = group_by_bracket(merged)
-    grouped = group_by_musical_semantics(grouped)
+    grouped = group_by_measure(grouped)
 
     grouped_out = out_dir / (midi_path.stem + ".svg")
     grouped.write_xml(str(grouped_out))
