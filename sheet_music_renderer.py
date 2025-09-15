@@ -292,7 +292,9 @@ def group_by_measure(svg: SVG) -> SVG:
 
 def strip_duplicate_clefs(svg: SVG) -> SVG:
     print("Stripping duplicate clefs...", end="")
+
     # TODO
+
     print("done.")
     return svg
 
@@ -357,7 +359,7 @@ def bracket_groups_to_long_strip(svg: SVG) -> SVG:
 
         g_copy *= Matrix.translate(dx, dy)
         for bar_line in [g for g in g_copy[0] if g.values["class"] == "BarLine"][2:-2]:
-            bar_line *= Matrix.translate_y(-dy/2)
+            bar_line *= Matrix.translate(-dx/2, -dy/2)
         out.append(g_copy)
         current_x += w
 
@@ -403,6 +405,6 @@ def midi_to_svg(midi_file: str, out_dir: str, mscore_cmd="mscore"):
 if __name__ == "__main__":
     midi_to_svg(
         "/home/u200b/Music/Credits Song For My Death.mid",
-        "./test/",
+        "./.sheet_music_cache/",
         "mscore"
     )
