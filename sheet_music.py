@@ -365,6 +365,11 @@ class SheetMusicRenderer:
             tgt = int(self.notehead_xs[int(self._current_note_idx)]) - play_x
             tgt = max(0, min(tgt, max_off))
             self._target_x_off = float(tgt)
+            # reset internal timing so smoothing uses the current time (prevents large dt)
+            try:
+                self._last_time_ms = pygame.time.get_ticks()
+            except Exception:
+                pass
             if self.debug:
                 print(f"Advanced current note index to {self._current_note_idx}, target offset {self._target_x_off}")
         except Exception:
@@ -377,8 +382,11 @@ class SheetMusicRenderer:
         self._view_x_off = 0.0
         self._target_x_off = 0.0
 
-    def seek_to_progress(self, progress: float) -> None:
-        """Seek the visible strip to the given progress (0.0-1.0). If visual noteheads exist, choose nearest visual note index."""
+    def seek_to_progress(self, progress: float, instant: bool = False) -> None:
+        """Seek the visible strip to the given progress (0.0-1.0).
+        If visual noteheads exist, choose nearest visual note index. By default the view will
+        animate smoothly toward the new target; pass instant=True to jump immediately.
+        """
         if self.full_surface is None:
             return
         view_w = int(self.screen_width)
@@ -393,11 +401,22 @@ class SheetMusicRenderer:
             tgt = int(self.notehead_xs[int(self._current_note_idx)]) - play_x
             tgt = max(0, min(tgt, max_off))
             self._target_x_off = float(tgt)
-            # also set view immediately so user sees immediate jump
-            self._view_x_off = float(self._target_x_off)
-            self._screen_play_x = float(int(self.notehead_xs[int(self._current_note_idx)]) - int(self._view_x_off))
+            # If instant requested, also set view immediately so user sees immediate jump
+            if instant:
+                self._view_x_off = float(self._target_x_off)
+                self._screen_play_x = float(int(self.notehead_xs[int(self._current_note_idx)]) - int(self._view_x_off))
+            else:
+                # reset internal timing so smoothing begins from current view position
+                try:
+                    self._last_time_ms = pygame.time.get_ticks()
+                except Exception:
+                    pass
         else:
             tgt = int(p * max_off)
             self._target_x_off = float(tgt)
-            self._view_x_off = float(self._target_x_off)
-            self._screen_play_x = float(int(view_w * 0.45))
+            if instant:
+                self._view_x_off = float(self._target_x_off)
+                try:
+                    self._last_time_ms = pygame.time.get_ticks()
+                except Exception:
+                    pass
