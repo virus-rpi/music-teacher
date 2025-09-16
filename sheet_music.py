@@ -3,35 +3,14 @@ import math
 import pygame
 from PIL import Image, ImageOps, ImageFilter
 from sheet_music_renderer import midi_to_svg
-from typing import Optional, Iterable
+from typing import Optional
 import cairosvg
 import json
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ElementTree
 
 _resampling = getattr(Image, "Resampling", Image)
 RESAMPLE_LANCZOS = getattr(_resampling, "LANCZOS", getattr(_resampling, "BICUBIC", getattr(Image, "NEAREST", 0)))
 _CAIROSVG_DPI = 1200
-
-_WHITESPACE_THRESHOLD = 0.90
-_MIN_SYSTEM_HEIGHT = 18
-_MORPH_BLUR = 3
-_MIN_SYSTEM_GAP_FRAC = 0.03
-_GAP_PERCENTILE = 0.70
-_MIN_PADDING = 24
-_MAX_PADDING = 140
-_PADDING_FRAC = 0.22
-
-_BARLINE_SCAN_FRAC = 0.45
-_DARK_THRESH = 100
-_BARLINE_MIN_FRAC = 0.30
-_BARLINE_MIN_FRAC_HALF = 0.10
-_BARLINE_SMOOTH = 2
-
-_BG_GRAY = 20
-_BG_RGBA = (20, 20, 20, 255)
-
-_SPLIT_CACHE_VERSION = "v1"
-
 
 class SheetMusicRenderer:
     def __init__(self, midi_path: str | Path, screen_width: int, height: int = 260, debug: bool = False) -> None:
@@ -76,6 +55,113 @@ class SheetMusicRenderer:
         key = f"{self.midi_path.name}_{mtime}_{size}"
         return key
 
+    def _load_notehead_cache(self, note_xs_cache: Path) -> None:
+        if not note_xs_cache.exists():
+            return
+        try:
+            with note_xs_cache.open("r", encoding="utf-8") as fh:
+                raw = json.load(fh)
+                self.notehead_xs = [float(x) for x in raw if x is not None]
+        except Exception:
+            self.notehead_xs = []
+
+    def _call_midi_to_svg(self, cache_subdir: Path, svg_out: Path, note_xs_cache: Path) -> None:
+        try:
+            try:
+                res = midi_to_svg(str(self.midi_path), str(cache_subdir))
+            except TypeError:
+                res = midi_to_svg(str(self.midi_path), str(cache_subdir), "mscore")
+            if isinstance(res, list):
+                try:
+                    with note_xs_cache.open("w", encoding="utf-8") as fh:
+                        json.dump([float(x) for x in res], fh)
+                except Exception as e:
+                    print("SheetMusicRenderer: failed to save note x positions:", e)
+                self.notehead_xs = [float(x) for x in res]
+        except Exception as e:
+            print("SheetMusicRenderer: failed to render SVG via sheet_music_renderer:", e)
+            return
+
+        if not svg_out.exists():
+            svgs = list(cache_subdir.glob(f"{self.midi_path.stem}*.svg"))
+            if svgs:
+                svg_out = svgs[0]
+
+        if not svg_out.exists():
+            print("No SVG produced by sheet_music_renderer; aborting strip preparation.")
+            return
+
+    @staticmethod
+    def _convert_svg_to_png(svg_out: Path, strip_png: Path) -> bool:
+        try:
+            cairosvg.svg2png(url=str(svg_out), write_to=str(strip_png), dpi=_CAIROSVG_DPI, scale=2.0, negate_colors=True)
+            return True
+        except Exception as e:
+            print("Failed to convert SVG to PNG: ", e)
+            return False
+
+    def _open_and_process_image(self, strip_png: Path, svg_path: Path) -> tuple[Optional[Image.Image], Optional[float], int, int]:
+        """Open PNG, crop whitespace on left, resize to strip_height.
+        Returns (pil_image, svg_width_if_found_or_None, cropped_w, left_crop)
+        """
+        try:
+            im = Image.open(str(strip_png)).convert("RGBA")
+        except Exception as e:
+            print("Failed to open generated PNG:", e)
+            return None, None, 0, 0
+
+        svg_width = None
+        if svg_path.exists():
+            tree = ElementTree.parse(str(svg_path))
+            root = tree.getroot()
+            w = root.get('width') or root.get('{http://www.w3.org/2000/svg}width')
+            if w:
+                if isinstance(w, str) and w.endswith('px'):
+                    w = w[:-2]
+                svg_width = float(w)
+
+        left_crop = 0
+        bbox = ImageOps.invert(im.convert("L")).getbbox()
+        if bbox is not None:
+            l, _, r, _ = map(int, bbox)
+            if r - l > 0:
+                left_crop = l
+                im = im.crop((l, 0, r, im.height))
+
+        cropped_w = im.width
+        scale = self.strip_height / float(max(1, im.height))
+        new_w = max(1, int(im.width * scale))
+        strip_resized = im.resize((new_w, self.strip_height), RESAMPLE_LANCZOS).convert("RGBA")
+        strip_resized = strip_resized.filter(ImageFilter.UnsharpMask(radius=0.5, percent=150, threshold=2))
+        return strip_resized, svg_width, cropped_w, left_crop
+
+    def _scale_cached_note_positions(self, svg_width, cropped_w, left_crop, strip_resized):
+        if not self.notehead_xs:
+            return
+        try:
+            if svg_width and svg_width > 0:
+                pixels_per_svg_unit = float(cropped_w) / float(svg_width)
+            else:
+                pixels_per_svg_unit = 1.0
+
+            final_scale = float(strip_resized.width) / float(max(1, cropped_w))
+            pxs = []
+            for x in self.notehead_xs:
+                try:
+                    x_px = float(x) * pixels_per_svg_unit
+                except Exception:
+                    continue
+                x_adj_px = x_px - float(left_crop)
+                if x_adj_px < 0 or x_adj_px > float(cropped_w):
+                    continue
+                pxs.append(int(round(x_adj_px * final_scale)))
+            pxs = sorted(set(pxs))
+            self.notehead_xs = pxs
+        except Exception as e:
+            if self.debug:
+                print("Failed to scale cached note x positions:", e)
+            self.notehead_xs = []
+
     def _prepare_strip(self) -> None:
         cache_dir = self._get_cache_dir()
         cache_key = self._midi_cache_key()
@@ -84,313 +170,195 @@ class SheetMusicRenderer:
 
         strip_png = cache_subdir / "strip.png"
         svg_out = cache_subdir / f"{self.midi_path.stem}.svg"
-
         note_xs_cache = cache_subdir / "note_xs.json"
-        if note_xs_cache.exists():
-            try:
-                with note_xs_cache.open("r", encoding="utf-8") as fh:
-                    raw = json.load(fh)
-                    self.notehead_xs = [float(x) for x in raw if x is not None]
-            except Exception:
-                self.notehead_xs = []
-
+        self._load_notehead_cache(note_xs_cache)
         if not strip_png.exists() or not self.notehead_xs:
-            try:
-                try:
-                    res = midi_to_svg(str(self.midi_path), str(cache_subdir))
-                except TypeError:
-                    res = midi_to_svg(str(self.midi_path), str(cache_subdir), "mscore")
-                if isinstance(res, list):
-                    try:
-                        with note_xs_cache.open("w", encoding="utf-8") as fh:
-                            json.dump([float(x) for x in res], fh)
-                    except Exception as e:
-                        print("SheetMusicRenderer: failed to save note x positions:", e)
-                        pass
-
-                    self.notehead_xs = [float(x) for x in res]
-            except Exception as e:
-                print("SheetMusicRenderer: failed to render SVG via sheet_music_renderer:", e)
-                return
-
+            self._call_midi_to_svg(cache_subdir, svg_out, note_xs_cache)
             if not svg_out.exists():
                 svgs = list(cache_subdir.glob(f"{self.midi_path.stem}*.svg"))
                 if svgs:
                     svg_out = svgs[0]
-
             if not svg_out.exists():
-                print("No SVG produced by sheet_music_renderer; aborting strip preparation.")
                 return
 
-            try:
-                cairosvg.svg2png(url=str(svg_out), write_to=str(strip_png), dpi=_CAIROSVG_DPI, scale=2, negate_colors=True, background_color=f"#{_BG_RGBA[0]:02x}{_BG_RGBA[1]:02x}{_BG_RGBA[2]:02x}")
-            except Exception as e:
-                print(
-                    "Failed to convert SVG to PNG: ", e)
+            ok = self._convert_svg_to_png(svg_out, strip_png)
+            if not ok:
                 return
 
-        try:
-            im = Image.open(str(strip_png)).convert("RGBA")
-        except Exception as e:
-            print("Failed to open generated PNG:", e)
+        strip_resized, svg_width, cropped_w, left_crop = self._open_and_process_image(strip_png, svg_out)
+        if strip_resized is None:
             return
-
-        svg_width = None
         try:
-            if svg_out.exists():
-                tree = ET.parse(str(svg_out))
-                root = tree.getroot()
-                w = root.get('width') or root.get('{http://www.w3.org/2000/svg}width')
-                if w:
-                    if isinstance(w, str) and w.endswith('px'):
-                        w = w[:-2]
-                    svg_width = float(w)
-        except Exception:
-            svg_width = None
-
-        left_crop = 0
-        try:
-            bbox = ImageOps.invert(im.convert("L")).getbbox()
-            if bbox is not None:
-                l, _, r, _ = map(int, bbox)
-                if r - l > 0:
-                    left_crop = l
-                    im = im.crop((l, 0, r, im.height))
-        except Exception:
-            left_crop = 0
-
-        cropped_w = im.width
-
-        try:
-            scale = self.strip_height / float(max(1, im.height))
-            new_w = max(1, int(im.width * scale))
-            strip_resized = im.resize((new_w, self.strip_height), RESAMPLE_LANCZOS).convert("RGBA")
-        except Exception as e:
-            print("Failed to resize strip image:", e)
-            return
-
-        try:
-            strip_resized = strip_resized.filter(ImageFilter.UnsharpMask(radius=0.5, percent=150, threshold=2))
-        except Exception:
-            pass
-
-        data = strip_resized.tobytes()
-        try:
+            data = strip_resized.tobytes()
             self.full_surface = pygame.image.fromstring(data, strip_resized.size, "RGBA").convert_alpha()
         except Exception as e:
             print("Failed to create pygame surface from strip image:", e)
             return
 
         self.full_width = strip_resized.size[0]
-
-        if self.notehead_xs:
-            try:
-                if svg_width and svg_width > 0:
-                    pixels_per_svg_unit = float(cropped_w) / float(svg_width)
-                else:
-                    pixels_per_svg_unit = 1.0
-
-                final_scale = float(strip_resized.width) / float(max(1, cropped_w))
-                pxs = []
-                for x in self.notehead_xs:
-                    try:
-                        x_px = float(x) * pixels_per_svg_unit
-                    except Exception:
-                        continue
-                    x_adj_px = x_px - float(left_crop)
-                    if x_adj_px < 0 or x_adj_px > float(cropped_w):
-                        continue
-                    pxs.append(int(round(x_adj_px * final_scale)))
-                pxs = sorted(set(pxs))
-                self.notehead_xs = pxs
-            except Exception as e:
-                if self.debug:
-                    print("Failed to scale cached note x positions:", e)
-                self.notehead_xs = []
-        else:
-            try:
-                self.notehead_xs.sort()
-            except Exception as e:
-                print("Notehead detection failed:", e)
-                self.notehead_xs = []
+        self._scale_cached_note_positions(svg_width=svg_width, cropped_w=cropped_w, left_crop=left_crop, strip_resized=strip_resized)
 
         if self.debug:
             print(f"Built strip from SVG: width={self.full_width}px, detected {len(self.notehead_xs)} visual noteheads")
 
-    def draw(self, screen: pygame.Surface, y: int, progress: float, highlight_pitches: Optional[Iterable[int]] = None) -> None:
+    def draw(self, screen: pygame.Surface, y: int, progress: float) -> None:
         if self.full_surface is None:
             return
         view_w = self.screen_width
 
-        # Compute desired target offset for this frame (based on current note index or progress)
+        self._compute_target_offset(view_w, progress)
+        dt = self._update_view_smoothing()
+
+        x_off = int(round(max(0.0, min(self._view_x_off, float(max(0, self.full_width - view_w))))))
+        src_rect = pygame.Rect(x_off, 0, view_w, self.strip_height)
+        screen.blit(self.full_surface, (0, y), src_rect)
+
+        screen_play_x = self._compute_screen_play_x(view_w, x_off, dt)
+
+        self._draw_overlay(screen, y, view_w, screen_play_x)
+        self._draw_debug_lines(screen, y, x_off, view_w)
+
+        pygame.draw.rect(screen, (20, 20, 20), (0, y, view_w, self.strip_height), 2)
+
+    def _compute_target_offset(self, view_w: int, progress: float) -> None:
+        """Compute and set self._target_x_off based on current note index or progress."""
         max_off = max(0, self.full_width - view_w)
+        play_x = int(view_w * 0.45)
         if self.notehead_xs and 0 <= int(self._current_note_idx) < len(self.notehead_xs):
-            play_x = int(view_w * 0.45)
             target_x = int(self.notehead_xs[int(self._current_note_idx)])
             desired = int(target_x - play_x)
-            if desired < 0:
-                desired = 0
-            if desired > max_off:
-                desired = max_off
+            desired = max(0, min(desired, max_off))
             self._target_x_off = float(desired)
-        else:
-            p = min(max(progress, 0.0), 1.0)
-            self._target_x_off = float(int(p * max_off))
+            return
+        p = min(max(progress, 0.0), 1.0)
+        self._target_x_off = float(int(p * max_off))
 
-        # update smoothing based on elapsed time
+    def _update_view_smoothing(self) -> float:
+        """Update view offset smoothing; returns dt in seconds used for this frame."""
         now_ms = pygame.time.get_ticks()
         dt = max(0.0, (now_ms - getattr(self, '_last_time_ms', now_ms)) / 1000.0)
         self._last_time_ms = now_ms
         if dt > 0.0:
-            # exponential smoothing factor
             alpha = 1.0 - math.exp(-dt / max(1e-6, self._scroll_tau))
             self._view_x_off += (self._target_x_off - self._view_x_off) * alpha
-            # snap if very close
             if abs(self._target_x_off - self._view_x_off) < 0.5:
                 self._view_x_off = float(self._target_x_off)
+        return dt
 
-        x_off = int(round(max(0.0, min(self._view_x_off, float(max_off)))))
-        src_rect = pygame.Rect(x_off, 0, view_w, self.strip_height)
-        screen.blit(self.full_surface, (0, y), src_rect)
-        # Determine desired screen play position (relative to view) and smooth it
+    def _compute_screen_play_x(self, view_w: int, x_off: int, dt: float) -> float:
+        """Compute and smooth the play-line X position relative to the view.
+
+        The play-line is smoothed toward the desired screen coordinate where the
+        current chord/note visual is expected. This mirrors the original logic
+        so the overlay and strip scrolling remain synchronized.
+        """
         if self.notehead_xs and 0 <= int(self._current_note_idx) < len(self.notehead_xs):
             desired_screen_play = float(int(self.notehead_xs[int(self._current_note_idx)]) - x_off)
         else:
             desired_screen_play = float(int(view_w * 0.45))
 
-        # initialize smoothed value if needed
         if self._screen_play_x is None:
             self._screen_play_x = desired_screen_play
 
-        # smooth the play x using the same dt as the view smoothing (frame-time)
         dt_play = dt if dt > 0.0 else (1.0 / 60.0)
         alpha_play = 1.0 - math.exp(-dt_play / max(1e-6, self._play_tau))
         self._screen_play_x += (desired_screen_play - self._screen_play_x) * alpha_play
-        # snap if very close to avoid tiny subpixel jitter
         if abs(desired_screen_play - self._screen_play_x) < 0.5:
             self._screen_play_x = float(desired_screen_play)
+        return float(self._screen_play_x)
 
-        screen_play_x = float(self._screen_play_x)
-
-        # Draw semi-transparent highlight rectangle (about 30px wide) and a semi-transparent vertical line
+    def _draw_overlay(self, screen: pygame.Surface, y: int, view_w: int, screen_play_x: float) -> None:
         overlay = pygame.Surface((view_w, self.strip_height), pygame.SRCALPHA)
         rect_w = 30
         rect_h = self.strip_height
         rect_x = int(round(screen_play_x - rect_w // 2))
         rect_y = 0
-        # rectangle color (semi-transparent cyan)
         rect_color = (0, 200, 255, 128)
-        pygame.draw.rect(overlay, rect_color, (rect_x, rect_y, rect_w, rect_h))
-        # vertical line (slightly more opaque)
+        try:
+            pygame.draw.rect(overlay, rect_color, (rect_x, rect_y, rect_w, rect_h))
+        except Exception:
+            pass
         line_color = (0, 200, 255, 200)
         pygame.draw.line(overlay, line_color, (int(round(screen_play_x)), 0), (int(round(screen_play_x)), rect_h), 3)
-        # blit overlay onto screen at the strip position
         screen.blit(overlay, (0, y))
 
-        if self.debug:
-            # draw a green vertical line at every note position
-            positions = set()
-            try:
-                positions.update(int(x) for x in self.notehead_xs)
-            except Exception:
-                pass
-            try:
-                for xs in self.note_to_xs.values():
-                    for xv in xs:
-                        positions.add(int(xv))
-            except Exception:
-                pass
-            for gx in sorted(positions):
-                sx = gx - x_off
-                if -4 <= sx <= view_w + 4:
-                    pygame.draw.line(screen, (90, 255, 120), (int(sx), y), (int(sx), y + self.strip_height), 1)
-        if highlight_pitches:
-            to_draw: list[tuple[int, tuple[int, int, int]]] = []
-            # absolute play-line X in strip coordinates (used to choose nearest visual note)
-            abs_play_x = x_off + int(round(screen_play_x))
-            for midi in highlight_pitches:
-                xs = self.note_to_xs.get(int(midi), [])
-                if not xs:
-                    continue
-                # Use the actual absolute play-line X when selecting which visual note to highlight
-                best = min(xs, key=lambda xv: abs(xv - abs_play_x))
-                screen_x = best - x_off
-                color = (0, 200, 255) if int(midi) >= 60 else (255, 140, 60)
-                to_draw.append((screen_x, color))
-            for sx, color in to_draw:
-                if -24 <= sx <= view_w + 24:
-                    r = 12
-                    pygame.draw.circle(screen, color, (int(sx), int(y + self.strip_height * 0.5)), r)
-                    surf = pygame.Surface((r * 4, r * 4), pygame.SRCALPHA)
-                    pygame.draw.circle(surf, (*color, 90), (r * 2, r * 2), int(r * 1.9))
-                    screen.blit(surf, (int(sx - r * 2), int(y + self.strip_height * 0.5 - r * 2)))
-        pygame.draw.rect(screen, (20, 20, 20), (0, y, view_w, self.strip_height), 2)
-
-    def advance_note(self) -> None:
-        """Advance the internal current note index by one (clamped)."""
+    def _draw_debug_lines(self, screen: pygame.Surface, y: int, x_off: int, view_w: int) -> None:
+        if not self.debug:
+            return
+        positions = set()
         try:
-            if not self.notehead_xs:
-                return
-            self._current_note_idx = min(len(self.notehead_xs) - 1, int(self._current_note_idx) + 1)
-            # compute and set target offset immediately so smooth scroll begins
-            view_w = int(self.screen_width)
-            play_x = int(view_w * 0.45)
-            max_off = max(0, self.full_width - view_w)
-            tgt = int(self.notehead_xs[int(self._current_note_idx)]) - play_x
-            tgt = max(0, min(tgt, max_off))
-            self._target_x_off = float(tgt)
-            # reset internal timing so smoothing uses the current time (prevents large dt)
-            try:
-                self._last_time_ms = pygame.time.get_ticks()
-            except Exception:
-                pass
-            if self.debug:
-                print(f"Advanced current note index to {self._current_note_idx}, target offset {self._target_x_off}")
+            positions.update(int(x) for x in self.notehead_xs)
+        except Exception:
+            pass
+        try:
+            for xs in self.note_to_xs.values():
+                for xv in xs:
+                    positions.add(int(xv))
+        except Exception:
+            pass
+        for gx in sorted(positions):
+            sx = gx - x_off
+            if -4 <= sx <= view_w + 4:
+                pygame.draw.line(screen, (90, 255, 120), (int(sx), y), (int(sx), y + self.strip_height), 1)
+
+    def advance_note(self, step: int = 1) -> None:
+        """Advance the current note index by `step` and update target/playing positions.
+        Keeps the smooth scrolling behavior but resets the play-line smoothing so it follows the new note.
+        """
+        try:
+            idx = int(self._current_note_idx) + int(step)
+        except Exception:
+            idx = int(step)
+        if self.notehead_xs:
+            idx = max(0, min(idx, len(self.notehead_xs) - 1))
+        else:
+            idx = max(0, idx)
+        self._current_note_idx = idx
+        self._compute_target_offset(self.screen_width, 0.0)
+
+        self._screen_play_x = None
+        try:
+            self._last_time_ms = pygame.time.get_ticks()
         except Exception:
             pass
 
     def reset_note_index(self) -> None:
-        """Reset the current note index to the start."""
-        self._current_note_idx = 0
-        # jump view to start immediately
-        self._view_x_off = 0.0
-        self._target_x_off = 0.0
+        """Reset current note index to the start and jump view to that position."""
+        self.seek_to_index(0)
 
-    def seek_to_progress(self, progress: float, instant: bool = False) -> None:
-        """Seek the visible strip to the given progress (0.0-1.0).
-        If visual noteheads exist, choose nearest visual note index. By default the view will
-        animate smoothly toward the new target; pass instant=True to jump immediately.
+    def seek_to_progress(self, progress: float) -> None:
+        """Seek the sheet view to a relative progress (0.0-1.0).
+        If visual note positions are available, map progress to a note index and seek to it.
+        Otherwise jump the view offset directly.
         """
-        if self.full_surface is None:
-            return
-        view_w = int(self.screen_width)
-        max_off = max(0, self.full_width - view_w)
-        p = max(0.0, min(1.0, float(progress)))
-        # Prefer snapping to nearest detected visual note
+        p = min(max(float(progress), 0.0), 1.0)
         if self.notehead_xs:
-            idx = int(round(p * (len(self.notehead_xs) - 1)))
-            idx = max(0, min(idx, len(self.notehead_xs) - 1))
+            count = len(self.notehead_xs)
+            idx = int(round(p * (count - 1))) if count > 0 else 0
+            self.seek_to_index(idx)
+            return
+        max_off = max(0, self.full_width - self.screen_width)
+        self._target_x_off = float(int(p * max_off))
+        self._view_x_off = float(self._target_x_off)
+        self._screen_play_x = None
+        try:
+            self._last_time_ms = pygame.time.get_ticks()
+        except Exception:
+            pass
+
+    def seek_to_index(self, index: int) -> None:
+        """Seek directly to a visual note index (clamped). Jumps the view to the target immediately."""
+        # If chord_xs exists, index refers to chord index; otherwise it's a visual-note index
+        if self.notehead_xs:
+            idx = max(0, min(int(index), len(self.notehead_xs) - 1))
             self._current_note_idx = idx
-            play_x = int(view_w * 0.45)
-            tgt = int(self.notehead_xs[int(self._current_note_idx)]) - play_x
-            tgt = max(0, min(tgt, max_off))
-            self._target_x_off = float(tgt)
-            # If instant requested, also set view immediately so user sees immediate jump
-            if instant:
-                self._view_x_off = float(self._target_x_off)
-                self._screen_play_x = float(int(self.notehead_xs[int(self._current_note_idx)]) - int(self._view_x_off))
-            else:
-                # reset internal timing so smoothing begins from current view position
-                try:
-                    self._last_time_ms = pygame.time.get_ticks()
-                except Exception:
-                    pass
+            self._compute_target_offset(self.screen_width, 0.0)
+            self._view_x_off = float(self._target_x_off)
+            self._screen_play_x = None
+            try:
+                self._last_time_ms = pygame.time.get_ticks()
+            except Exception:
+                pass
+            return
         else:
-            tgt = int(p * max_off)
-            self._target_x_off = float(tgt)
-            if instant:
-                self._view_x_off = float(self._target_x_off)
-                try:
-                    self._last_time_ms = pygame.time.get_ticks()
-                except Exception:
-                    pass
+            self._current_note_idx = max(0, int(index))

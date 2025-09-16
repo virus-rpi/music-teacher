@@ -33,28 +33,28 @@ def draw_hand_marker(screen, x, y, width, height, hand, border_radius):
 def draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, highlighted_notes=None):
     highlighted_notes = highlighted_notes or {}
     screen_width, screen_height = dims['SCREEN_WIDTH'], dims['SCREEN_HEIGHT']
-    WHITE_KEY_WIDTH = dims['WHITE_KEY_WIDTH']
-    WHITE_KEY_HEIGHT = dims['WHITE_KEY_HEIGHT']
-    BLACK_KEY_WIDTH = dims['BLACK_KEY_WIDTH']
-    BLACK_KEY_HEIGHT = dims['BLACK_KEY_HEIGHT']
-    PEDAL_WIDTH = dims['PEDAL_WIDTH']
-    PEDAL_HEIGHT = dims['PEDAL_HEIGHT']
-    PEDAL_SPACING = dims['PEDAL_SPACING']
-    PEDAL_Y = dims['PEDAL_Y']
-    LOWEST_NOTE = dims['LOWEST_NOTE']
-    HIGHEST_NOTE = dims['HIGHEST_NOTE']
-    PIANO_Y_OFFSET = dims['PIANO_Y_OFFSET']
+    white_key_width = dims['WHITE_KEY_WIDTH']
+    white_key_height = dims['WHITE_KEY_HEIGHT']
+    black_key_width = dims['BLACK_KEY_WIDTH']
+    black_key_height = dims['BLACK_KEY_HEIGHT']
+    pedal_width = dims['PEDAL_WIDTH']
+    pedal_height = dims['PEDAL_HEIGHT']
+    pedal_spacing = dims['PEDAL_SPACING']
+    pedal_y = dims['PEDAL_Y']
+    lowest_note = dims['LOWEST_NOTE']
+    highest_note = dims['HIGHEST_NOTE']
+    piano_y_offset = dims['PIANO_Y_OFFSET']
 
-    bg_top = max(0, int(PIANO_Y_OFFSET) - 12)
-    bg_height = int(WHITE_KEY_HEIGHT + PEDAL_HEIGHT + 60)
+    bg_top = max(0, int(piano_y_offset) - 12)
+    bg_height = int(white_key_height + pedal_height + 60)
     pygame.draw.rect(screen, BG_COLOR, (0, bg_top, screen_width, bg_height))
 
     now = pygame.time.get_ticks()
     white_index = 0
-    for midi_note in range(LOWEST_NOTE, HIGHEST_NOTE + 1):
+    for midi_note in range(lowest_note, highest_note + 1):
         if not is_black(midi_note):
-            x = white_index * WHITE_KEY_WIDTH
-            rect = pygame.Rect(x, PIANO_Y_OFFSET, WHITE_KEY_WIDTH, WHITE_KEY_HEIGHT)
+            x = white_index * white_key_width
+            rect = pygame.Rect(x, piano_y_offset, white_key_width, white_key_height)
             color = WHITE_KEY_COLOR
             hand = highlighted_notes.get(midi_note)
             if hand:
@@ -74,12 +74,12 @@ def draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, highlighte
             pygame.draw.rect(screen, (0, 0, 0), rect, 1, border_radius=KEY_CORNER_RADIUS)
             white_index += 1
     white_index = 0
-    for midi_note in range(LOWEST_NOTE, HIGHEST_NOTE):
+    for midi_note in range(lowest_note, highest_note):
         if not is_black(midi_note):
-            x = white_index * WHITE_KEY_WIDTH
+            x = white_index * white_key_width
             if note_names[midi_note % 12] not in ['E', 'B']:
-                black_x = x + WHITE_KEY_WIDTH * 0.7
-                rect = pygame.Rect(black_x, PIANO_Y_OFFSET, BLACK_KEY_WIDTH, BLACK_KEY_HEIGHT)
+                black_x = x + white_key_width * 0.7
+                rect = pygame.Rect(black_x, piano_y_offset, black_key_width, black_key_height)
                 color = BLACK_KEY_COLOR  # Always start with default
                 hand = highlighted_notes.get(midi_note + 1)
                 if hand:
@@ -95,11 +95,11 @@ def draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, highlighte
                 pygame.draw.rect(screen, color, rect, border_radius=KEY_CORNER_RADIUS)
             white_index += 1
     pedal_names = ["soft", "sostenuto", "sustain"]
-    total_width = PEDAL_WIDTH * 3 + PEDAL_SPACING * 2
+    total_width = pedal_width * 3 + pedal_spacing * 2
     start_x = (screen_width - total_width) // 2
     for i, pedal in enumerate(pedal_names):
-        x = start_x + i * (PEDAL_WIDTH + PEDAL_SPACING)
-        rect = pygame.Rect(x, PEDAL_Y, PEDAL_WIDTH, PEDAL_HEIGHT)
+        x = start_x + i * (pedal_width + pedal_spacing)
+        rect = pygame.Rect(x, pedal_y, pedal_width, pedal_height)
         color = PEDAL_ACTIVE_COLOR if pedals[pedal] else PEDAL_COLOR
         pygame.draw.rect(screen, color, rect, border_radius=PEDAL_CORNER_RADIUS)
         pygame.draw.rect(screen, (0, 0, 0), rect, 2, border_radius=PEDAL_CORNER_RADIUS)

@@ -428,7 +428,7 @@ def midi_to_svg(midi_file: str, out_dir: str, mscore_cmd="mscore"):
             p.unlink()
 
     print(f"Done. Final merged SVG: {grouped_out}")
-    return list(set(note_xs))
+    return sorted(list(set(note_xs)))
 
 if __name__ == "__main__":
     midi_to_svg(

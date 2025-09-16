@@ -6,7 +6,6 @@ class MidiTeacher:
         self.chords = self._extract_chords()
         self.current_index = 0
         self._pending_notes = set()
-        # Loop/practice range state
         self.loop_enabled = False
         self.loop_start = 0
         self.loop_end = max(0, len(self.chords) - 1)
@@ -15,7 +14,6 @@ class MidiTeacher:
     def _extract_chords(self):
         mid = mido.MidiFile(self.midi_path)
         events = []
-        # Collect note_on events with track index
         for track_idx, track in enumerate(mid.tracks):
             abs_time = 0
             for msg in track:
@@ -43,7 +41,6 @@ class MidiTeacher:
 
     def get_next_notes(self):
         if self.current_index < len(self.chords):
-            # Return dict: {note: hand}
             return {note: hand for note, hand in self.chords[self.current_index]}
         return {}
 
@@ -70,7 +67,6 @@ class MidiTeacher:
 
     # Debug helper: force-advance by one chord regardless of pressed notes
     def advance_one(self):
-        # clear wrap flag for this attempt
         self._last_wrapped = False
         if self.current_index < len(self.chords):
             self.current_index += 1
@@ -80,7 +76,6 @@ class MidiTeacher:
             return True
         return False
 
-    # New control methods
     def seek_to_index(self, index: int):
         """Seek directly to a chord index (clamped)."""
         if not self.chords:

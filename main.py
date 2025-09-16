@@ -68,8 +68,8 @@ def midi_listener():
     except IndexError:
         print("No MIDI input found.")
         return
-    with mido.open_input(port_name) as inport:
-        for msg in inport:
+    with mido.open_input(port_name) as in_port:
+        for msg in in_port:
             print(msg)
             if msg.type == "note_on" and msg.velocity > 0:
                 pressed_keys[msg.note] = True
@@ -178,7 +178,6 @@ while running:
                 print(f"Loop enabled: {midi_teacher.loop_enabled}")
 
         if event.type == pygame.MOUSEBUTTONDOWN:
-            # Click on progress bar to seek
             mx, my = event.pos
             bar_height = 28
             bar_margin = 24
