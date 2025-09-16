@@ -29,5 +29,27 @@ class Synth:
         self.fs.noteon(9, 71, 127)
         self.fs.program_select(0, self.sfid, 0, 0)
 
+    def play_measure(self, measure_index, midi_teacher):
+        chords, times, _ = midi_teacher.get_notes_for_measure(measure_index)
+        if not chords:
+            return
+        
+        self.play_notes(chords, times)
+
+    def play_notes(self, chords, times):
+        if not chords or not times:
+            return
+
+        import time
+        start_time = time.time()
+        time_offset = times[0]
+
+        for i, chord in enumerate(chords):
+            chord_time = times[i] - time_offset
+            while (time.time() - start_time)*1000 < chord_time:
+                time.sleep(0.001)
+            for note, hand in chord:
+                self.note_on(note, 100)
+
     def delete(self):
         self.fs.delete()

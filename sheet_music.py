@@ -22,6 +22,7 @@ class SheetMusicRenderer:
         self.full_surface: Optional[pygame.Surface] = None
         self.full_width: int = 0
         self.notehead_xs: list[int] = []
+        self.measure_data: list = []
         self._current_note_idx: int = 0
         self._view_x_off: float = 0.0
         self._target_x_off: float = 0.0
@@ -52,29 +53,68 @@ class SheetMusicRenderer:
         key = f"{self.midi_path.name}_{mtime}_{size}"
         return key
 
-    def _load_notehead_cache(self, note_xs_cache: Path) -> None:
-        if not note_xs_cache.exists():
-            return
-        try:
-            with note_xs_cache.open("r", encoding="utf-8") as fh:
-                raw = json.load(fh)
-                self.notehead_xs = [float(x) for x in raw if x is not None]
-        except (json.JSONDecodeError, OSError, ValueError, TypeError):
-            self.notehead_xs = []
+    def _load_cache_data(self, cache_subdir: Path) -> None:
+        note_xs_cache = cache_subdir / "note_xs.json"
+        measure_data_cache = cache_subdir / "measure_data.json"
 
-    def _call_midi_to_svg(self, cache_subdir: Path, svg_out: Path, note_xs_cache: Path) -> None:
+        if note_xs_cache.exists():
+            try:
+                with note_xs_cache.open("r", encoding="utf-8") as fh:
+                    raw = json.load(fh)
+                    self.notehead_xs = [float(x) for x in raw if x is not None]
+            except (json.JSONDecodeError, OSError, ValueError, TypeError):
+                self.notehead_xs = []
+        
+        if measure_data_cache.exists():
+            try:
+                with measure_data_cache.open("r", encoding="utf-8") as fh:
+                    # We need to deserialize the element objects correctly
+                    # For now, we'll just load the x coordinates and assume the structure
+                    raw_measure_data = json.load(fh)
+                    self.measure_data = []
+                    for measure in raw_measure_data:
+                        notes_in_measure = []
+                        for note_info in measure:
+                            # Reconstruct the note info, element will be None
+                            notes_in_measure.append({'x': note_info['x'], 'element': None})
+                        self.measure_data.append(notes_in_measure)
+            except (json.JSONDecodeError, OSError, ValueError, TypeError) as e:
+                print(f"SheetMusicRenderer: failed to load measure data cache: {e}")
+                self.measure_data = []
+
+    def _call_midi_to_svg(self, cache_subdir: Path, svg_out: Path) -> None:
+        note_xs_cache = cache_subdir / "note_xs.json"
+        measure_data_cache = cache_subdir / "measure_data.json"
         try:
             try:
-                res = midi_to_svg(str(self.midi_path), str(cache_subdir))
+                res_note_xs, res_measure_data = midi_to_svg(str(self.midi_path), str(cache_subdir))
             except TypeError:
-                res = midi_to_svg(str(self.midi_path), str(cache_subdir), "mscore")
-            if isinstance(res, list):
+                res_note_xs, res_measure_data = midi_to_svg(str(self.midi_path), str(cache_subdir), "mscore")
+            
+            self.measure_data = res_measure_data
+            if isinstance(res_note_xs, list):
                 try:
                     with note_xs_cache.open("w", encoding="utf-8") as fh:
-                        json.dump([float(x) for x in res], fh)
+                        json.dump([float(x) for x in res_note_xs], fh)
                 except (OSError, TypeError, ValueError) as e:
                     print("SheetMusicRenderer: failed to save note x positions:", e)
-                self.notehead_xs = [float(x) for x in res]
+                self.notehead_xs = [float(x) for x in res_note_xs]
+
+            # Save measure data
+            if isinstance(res_measure_data, list):
+                try:
+                    with measure_data_cache.open("w", encoding="utf-8") as fh:
+                        # We only care about the x coordinate for caching
+                        serializable_measure_data = []
+                        for measure in res_measure_data:
+                            serializable_measure = []
+                            for note_info in measure:
+                                serializable_measure.append({'x': note_info['x']})
+                            serializable_measure_data.append(serializable_measure)
+                        json.dump(serializable_measure_data, fh)
+                except (OSError, TypeError, ValueError) as e:
+                    print(f"SheetMusicRenderer: failed to save measure data: {e}")
+
         except (RuntimeError, OSError, ValueError, TypeError) as e:
             print("SheetMusicRenderer: failed to render SVG via sheet_music_renderer:", e)
             return
@@ -171,9 +211,12 @@ class SheetMusicRenderer:
         strip_png = cache_subdir / "strip.png"
         svg_out = cache_subdir / f"{self.midi_path.stem}.svg"
         note_xs_cache = cache_subdir / "note_xs.json"
-        self._load_notehead_cache(note_xs_cache)
-        if not strip_png.exists() or not self.notehead_xs:
-            self._call_midi_to_svg(cache_subdir, svg_out, note_xs_cache)
+        measure_data_cache = cache_subdir / "measure_data.json"
+
+        self._load_cache_data(cache_subdir)
+
+        if not strip_png.exists() or not self.notehead_xs or not self.measure_data:
+            self._call_midi_to_svg(cache_subdir, svg_out)
             if not svg_out.exists():
                 svgs = list(cache_subdir.glob(f"{self.midi_path.stem}*.svg"))
                 if svgs:

@@ -298,6 +298,22 @@ def strip_duplicate_clefs(svg: SVG) -> SVG:
     print("done.")
     return svg
 
+def extract_measure_data(svg: SVG):
+    measure_data = []
+    for group in [g for g in list(svg.elements())[1:] if isinstance(g, Group)]:
+        for measure_group in [mg for mg in list(group) if isinstance(mg, Group) and 'Measure' in mg.values.get('id', '')]:
+            notes = []
+            for note_element in [n for n in list(measure_group) if 'Note' in n.values.get('class', '')]:
+                try:
+                    bb = note_element.bbox()
+                    if bb:
+                        x = (bb[0] + bb[2]) / 2.0
+                        notes.append({'x': x, 'element': note_element})
+                except Exception:
+                    continue
+            measure_data.append(notes)
+    return measure_data
+
 def bracket_groups_to_long_strip(svg: SVG) -> SVG:
     print("Laying out bracket groups into one long strip...", end="")
 
@@ -392,8 +408,11 @@ def midi_to_svg(midi_file: str, out_dir: str, mscore_cmd="mscore"):
     stripped_clefs = strip_duplicate_clefs(grouped)
     grouped = bracket_groups_to_long_strip(stripped_clefs)
 
+    measure_data = extract_measure_data(grouped)
+
     grouped_out = out_dir / (midi_path.stem + ".svg")
     grouped.write_xml(str(grouped_out))
+    print(f"[Debug] Generated SVG file: {grouped_out}")
 
     note_xs: list[float] = []
     try:
@@ -428,7 +447,7 @@ def midi_to_svg(midi_file: str, out_dir: str, mscore_cmd="mscore"):
             p.unlink()
 
     print(f"Done. Final merged SVG: {grouped_out}")
-    return sorted(list(set(note_xs)))
+    return sorted(list(set(note_xs))), measure_data
 
 if __name__ == "__main__":
     midi_to_svg(

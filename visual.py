@@ -198,3 +198,40 @@ def draw_ui_overlay(screen, midi_teacher, dims, font_small=None, font_medium=Non
     aa = max(0.0, min(1.0, float(alpha)))
     overlay.set_alpha(int(aa * 255))
     screen.blit(overlay, (0, 0))
+
+def draw_guided_mode_overlay(screen, guided_teacher, sheet_music_renderer, dims):
+    if not guided_teacher.is_active or not guided_teacher.current_section_visual_info:
+        return
+
+    # check for empty list
+    if not guided_teacher.current_section_visual_info:
+        return
+
+    sheet_y = dims['SHEET_Y']
+    strip_height = sheet_music_renderer.strip_height
+    view_x_off = sheet_music_renderer._view_x_off
+
+    start_x = guided_teacher.current_section_visual_info[0]
+    end_x = guided_teacher.current_section_visual_info[-1]
+
+    # Adjust for scroll
+    start_x -= view_x_off
+    end_x -= view_x_off
+
+    rect_x = start_x - 10 # padding
+    rect_y = sheet_y
+    rect_w = end_x - start_x + 20 # padding
+    rect_h = strip_height
+
+    overlay = pygame.Surface((rect_w, rect_h), pygame.SRCALPHA)
+    rect_color = (0, 255, 0, 128) # Green highlight
+    pygame.draw.rect(overlay, rect_color, (0, 0, rect_w, rect_h), border_radius=10)
+    screen.blit(overlay, (rect_x, rect_y))
+
+    score = guided_teacher.get_last_score()
+    if score is not None:
+        font = pygame.font.SysFont("Segoe UI", 24, bold=True)
+        score_text = f"Score: {score:.2f}"
+        text = font.render(score_text, True, (255, 255, 255))
+        text_rect = text.get_rect(center=(dims['SCREEN_WIDTH'] // 2, sheet_y + strip_height + 30))
+        screen.blit(text, text_rect)

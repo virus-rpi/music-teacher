@@ -1,10 +1,11 @@
 import pygame
 import mido
 import threading
-from visual import draw_piano, draw_ui_overlay, BG_COLOR
+from visual import draw_piano, draw_ui_overlay, BG_COLOR, draw_guided_mode_overlay
 from synth import Synth, PEDAL_CC
 from midi_teach import MidiTeacher
 from sheet_music import SheetMusicRenderer
+from guided_teacher import GuidedTeacher
 import math
 
 LOWEST_NOTE = 21   # A0
@@ -36,7 +37,9 @@ pressed_fade_keys = {}
 pedals = {"soft": False, "sostenuto": False, "sustain": False}
 synth_enabled = True
 teaching_mode = True
+guided_mode = False
 pressed_notes_set = set()
+pressed_note_events = []
 
 piano_y_default = PIANO_Y_OFFSET
 piano_y_center = (SCREEN_HEIGHT - WHITE_KEY_HEIGHT - PEDAL_HEIGHT) // 2
@@ -75,6 +78,8 @@ dims = {
 synth = Synth(SOUNDFONT_PATH)
 midi_teacher = MidiTeacher(MIDI_TEACH_PATH)
 sheet_music_renderer = SheetMusicRenderer(MIDI_TEACH_PATH, SCREEN_WIDTH)
+midi_teacher.set_measure_data(sheet_music_renderer.measure_data, sheet_music_renderer.notehead_xs)
+guided_teacher = GuidedTeacher(midi_teacher, synth)
 
 font_small = pygame.font.SysFont("Segoe UI", 16)
 font_medium = pygame.font.SysFont("Segoe UI", 20, bold=True)
@@ -93,6 +98,7 @@ def midi_listener():
                 pressed_keys[msg.note] = True
                 pressed_fade_keys[msg.note] = pygame.time.get_ticks()
                 pressed_notes_set.add(msg.note)
+                pressed_note_events.append((msg.note, pygame.time.get_ticks()))
                 if teaching_mode:
                     next_notes = midi_teacher.get_next_notes()
                     if msg.note in next_notes:
@@ -104,7 +110,7 @@ def midi_listener():
                 else:
                     if synth_enabled:
                         synth.note_on(msg.note, msg.velocity)
-                if teaching_mode:
+                if teaching_mode and not guided_mode:
                     if midi_teacher.advance_if_pressed(pressed_notes_set):
                         try:
                             if midi_teacher.did_wrap_and_clear():
@@ -135,6 +141,8 @@ while running:
     dt = max(0.0, (now_ms - last_time_ms) / 1000.0)
     last_time_ms = now_ms
 
+    if guided_mode:
+        guided_teacher.update(pressed_notes_set, pressed_note_events)
     for event in pygame.event.get():
         if event.type == pygame.QUIT or (
             event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
@@ -152,6 +160,13 @@ while running:
                     sheet_music_renderer.reset_note_index()
                 except Exception:
                     pass
+            if event.key == pygame.K_g:
+                guided_mode = not guided_mode
+                if guided_mode:
+                    guided_teacher.start()
+                else:
+                    guided_teacher.stop()
+                print(f"Guided mode: {guided_mode}")
             if event.key == pygame.K_d and teaching_mode:
                 advanced = midi_teacher.advance_one()
                 if advanced:
@@ -258,6 +273,8 @@ while running:
     dims['PEDAL_Y'] = int(piano_y_current + WHITE_KEY_HEIGHT + 30)
     draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, midi_teacher.get_next_notes() if teaching_mode else set())
     draw_ui_overlay(screen, midi_teacher, dims, font_small, font_medium, alpha=overlay_alpha_current)
+    if guided_mode:
+        draw_guided_mode_overlay(screen, guided_teacher, sheet_music_renderer, dims)
     sheet_music_renderer.draw(screen, dims.get('SHEET_Y', 0), midi_teacher.get_progress(), alpha=sheet_alpha_current)
 
     pygame.display.flip()

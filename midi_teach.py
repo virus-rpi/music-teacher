@@ -10,6 +10,7 @@ class MidiTeacher:
         self.loop_start = 0
         self.loop_end = max(0, len(self.chords) - 1)
         self._last_wrapped = False
+        self.measures = []
 
     def _extract_chords(self):
         mid = mido.MidiFile(self.midi_path)
@@ -157,3 +158,35 @@ class MidiTeacher:
         if not self.chords:
             return 0
         return max(0, len(self.chords) - max(0, int(start_idx)))
+
+    def set_measure_data(self, measure_data, notehead_xs):
+        print(f"[Debug] set_measure_data called. len(measure_data): {len(measure_data)}, len(self.chords): {len(self.chords)}")
+        if not measure_data or not self.chords:
+            return
+
+        self.measures = []
+        current_chord_idx = 0
+
+        for measure_svg_data in measure_data:
+            count = len(measure_svg_data) if measure_svg_data else 0
+            if count == 0:
+                self.measures.append(([], [], []))
+                continue
+
+            end_idx = min(current_chord_idx + count, len(self.chords))
+            measure_chords = self.chords[current_chord_idx:end_idx]
+            measure_chord_times = self.chord_times[current_chord_idx:end_idx]
+            measure_note_xs = notehead_xs[current_chord_idx:end_idx] if notehead_xs else []
+
+            self.measures.append((measure_chords, measure_chord_times, measure_note_xs))
+            current_chord_idx = end_idx
+
+    def get_notes_for_measure(self, measure_index):
+        if 0 <= measure_index < len(self.measures):
+            return self.measures[measure_index]
+        return [], [], []
+
+    def get_visual_info_for_measure(self, measure_index):
+        if 0 <= measure_index < len(self.measures):
+            return self.measures[measure_index][2]
+        return []
