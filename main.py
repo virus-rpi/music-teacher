@@ -119,7 +119,6 @@ while running:
             event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
             running = False
         if event.type == pygame.KEYDOWN:
-            # Keyboard controls for synth/teaching and seeking
             if event.key == pygame.K_s:
                 synth_enabled = not synth_enabled
                 print(f"Synth enabled: {synth_enabled}")
