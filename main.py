@@ -1,7 +1,7 @@
 import pygame
 import mido
 import threading
-from visual import draw_piano, draw_progress_bar, draw_ui_overlay
+from visual import draw_piano, draw_progress_bar, draw_ui_overlay, BG_COLOR
 from synth import Synth, PEDAL_CC
 from midi_teach import MidiTeacher
 from sheet_music import SheetMusicRenderer
@@ -26,7 +26,8 @@ BLACK_KEY_HEIGHT = WHITE_KEY_HEIGHT * 0.65
 PEDAL_WIDTH = int(WHITE_KEY_WIDTH * 1.2)
 PEDAL_HEIGHT = int(WHITE_KEY_HEIGHT * 0.6)
 PEDAL_SPACING = int(WHITE_KEY_WIDTH * 0.2)
-PIANO_Y_OFFSET = 24 + 28 + 16  # progress bar margin + bar height + extra spacing
+SHEET_Y = 24 + 28 + 64
+PIANO_Y_OFFSET = SHEET_Y + WHITE_KEY_HEIGHT + PEDAL_HEIGHT
 PEDAL_Y = PIANO_Y_OFFSET + WHITE_KEY_HEIGHT + 30
 
 pressed_keys = {}
@@ -49,7 +50,8 @@ dims = {
     'PEDAL_Y': PEDAL_Y,
     'LOWEST_NOTE': LOWEST_NOTE,
     'HIGHEST_NOTE': HIGHEST_NOTE,
-    'PIANO_Y_OFFSET': PIANO_Y_OFFSET
+    'PIANO_Y_OFFSET': PIANO_Y_OFFSET,
+    'SHEET_Y': SHEET_Y
 }
 
 synth = Synth(SOUNDFONT_PATH)
@@ -223,12 +225,13 @@ while running:
                 pressed_notes_set.clear()
 
     highlighted_notes = midi_teacher.get_next_notes() if teaching_mode else set()
+    screen.fill(BG_COLOR)
     draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, highlighted_notes)
     if teaching_mode:
         draw_ui_overlay(screen, midi_teacher, dims, font_small, font_medium)
     else:
         draw_progress_bar(screen, midi_teacher.get_progress(), dims)
-    sheet_music_renderer.draw(screen, dims['PEDAL_Y'] + dims['PEDAL_HEIGHT'] + 32, midi_teacher.get_progress())
+    sheet_music_renderer.draw(screen, dims.get('SHEET_Y', 0), midi_teacher.get_progress())
     pygame.display.flip()
     clock.tick(60)
 

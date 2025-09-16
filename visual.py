@@ -45,7 +45,10 @@ def draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, highlighte
     HIGHEST_NOTE = dims['HIGHEST_NOTE']
     PIANO_Y_OFFSET = dims['PIANO_Y_OFFSET']
 
-    screen.fill(BG_COLOR)
+    bg_top = max(0, int(PIANO_Y_OFFSET) - 12)
+    bg_height = int(WHITE_KEY_HEIGHT + PEDAL_HEIGHT + 60)
+    pygame.draw.rect(screen, BG_COLOR, (0, bg_top, screen_width, bg_height))
+
     now = pygame.time.get_ticks()
     white_index = 0
     for midi_note in range(LOWEST_NOTE, HIGHEST_NOTE + 1):
