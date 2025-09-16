@@ -21,10 +21,7 @@ class SheetMusicRenderer:
 
         self.full_surface: Optional[pygame.Surface] = None
         self.full_width: int = 0
-        self.note_to_xs: dict[int, list[int]] = {}
-        self.system_boxes: list[tuple[int, int]] = []
         self.notehead_xs: list[int] = []
-        self._notehead_xs_per_system: list[list[int]] = []
         self._current_note_idx: int = 0
         self._view_x_off: float = 0.0
         self._target_x_off: float = 0.0
@@ -290,12 +287,6 @@ class SheetMusicRenderer:
             positions.update(int(x) for x in self.notehead_xs)
         except Exception:
             pass
-        try:
-            for xs in self.note_to_xs.values():
-                for xv in xs:
-                    positions.add(int(xv))
-        except Exception:
-            pass
         for gx in sorted(positions):
             sx = gx - x_off
             if -4 <= sx <= view_w + 4:
@@ -313,10 +304,28 @@ class SheetMusicRenderer:
             idx = max(0, min(idx, len(self.notehead_xs) - 1))
         else:
             idx = max(0, idx)
+        if self.notehead_xs:
+            try:
+                view_w = self.screen_width
+                x_off = int(round(max(0.0, min(self._view_x_off, float(max(0, self.full_width - view_w))))))
+            except Exception:
+                view_w = self.screen_width
+                x_off = int(round(self._view_x_off)) if hasattr(self, '_view_x_off') else 0
+
+            if self._screen_play_x is None:
+                try:
+                    cur_idx = int(self._current_note_idx) if 0 <= int(self._current_note_idx) < len(self.notehead_xs) else None
+                    if cur_idx is not None:
+                        start_play = float(int(self.notehead_xs[cur_idx]) - x_off)
+                    else:
+                        start_play = float(int(view_w * 0.45))
+                    self._screen_play_x = float(start_play)
+                except Exception:
+                    self._screen_play_x = float(int(view_w * 0.45))
+
         self._current_note_idx = idx
         self._compute_target_offset(self.screen_width, 0.0)
 
-        self._screen_play_x = None
         try:
             self._last_time_ms = pygame.time.get_ticks()
         except Exception:
@@ -326,39 +335,80 @@ class SheetMusicRenderer:
         """Reset current note index to the start and jump view to that position."""
         self.seek_to_index(0)
 
-    def seek_to_progress(self, progress: float) -> None:
+    def seek_to_progress(self, progress: float, animate: bool = True) -> None:
         """Seek the sheet view to a relative progress (0.0-1.0).
         If visual note positions are available, map progress to a note index and seek to it.
-        Otherwise jump the view offset directly.
+        Otherwise jump or animate the view offset directly depending on `animate`.
         """
         p = min(max(float(progress), 0.0), 1.0)
         if self.notehead_xs:
             count = len(self.notehead_xs)
             idx = int(round(p * (count - 1))) if count > 0 else 0
-            self.seek_to_index(idx)
+            self.seek_to_index(idx, animate=animate)
             return
         max_off = max(0, self.full_width - self.screen_width)
         self._target_x_off = float(int(p * max_off))
-        self._view_x_off = float(self._target_x_off)
-        self._screen_play_x = None
+        if animate:
+            try:
+                if self._screen_play_x is None:
+                    self._screen_play_x = float(int(self.screen_width * 0.45))
+            except Exception:
+                pass
+        else:
+            self._view_x_off = float(self._target_x_off)
+            self._screen_play_x = None
         try:
             self._last_time_ms = pygame.time.get_ticks()
         except Exception:
             pass
 
-    def seek_to_index(self, index: int) -> None:
-        """Seek directly to a visual note index (clamped). Jumps the view to the target immediately."""
+    def seek_to_index(self, index: int, animate: bool = True) -> None:
+        """Seek directly to a visual note index (clamped).
+        If animate is True, smoothly scrolls the view to the new target (like advance_note).
+        If animate is False, jumps the view to the target immediately (old behavior).
+        """
         # If chord_xs exists, index refers to chord index; otherwise it's a visual-note index
         if self.notehead_xs:
+            # prepare a numeric starting point for the play-line so smoothing will animate it
+            try:
+                view_w = self.screen_width
+                x_off = int(round(max(0.0, min(self._view_x_off, float(max(0, self.full_width - view_w))))))
+            except Exception:
+                view_w = self.screen_width
+                x_off = int(round(self._view_x_off)) if hasattr(self, '_view_x_off') else 0
+
+            old_idx = int(self._current_note_idx) if self.notehead_xs and 0 <= int(self._current_note_idx) < len(self.notehead_xs) else None
+            if animate:
+                if self._screen_play_x is None:
+                    try:
+                        if old_idx is not None:
+                            start_play = float(int(self.notehead_xs[old_idx]) - x_off)
+                        else:
+                            start_play = float(int(view_w * 0.45))
+                        self._screen_play_x = float(start_play)
+                    except Exception:
+                        # fallback to center
+                        self._screen_play_x = float(int(view_w * 0.45))
+
             idx = max(0, min(int(index), len(self.notehead_xs) - 1))
             self._current_note_idx = idx
             self._compute_target_offset(self.screen_width, 0.0)
-            self._view_x_off = float(self._target_x_off)
-            self._screen_play_x = None
-            try:
-                self._last_time_ms = pygame.time.get_ticks()
-            except Exception:
-                pass
-            return
+            if animate:
+                # allow smoothing to animate the view and play-line
+                try:
+                    self._last_time_ms = pygame.time.get_ticks()
+                except Exception:
+                    pass
+                return
+            else:
+                # immediate jump to target (preserve old behavior)
+                self._view_x_off = float(self._target_x_off)
+                self._screen_play_x = None
+                try:
+                    self._last_time_ms = pygame.time.get_ticks()
+                except Exception:
+                    pass
+                return
         else:
+            # No visual note positions; just set the index. There's no view target to animate to here.
             self._current_note_idx = max(0, int(index))
