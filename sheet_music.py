@@ -1,14 +1,16 @@
 from pathlib import Path
 import math
 import pygame
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageFilter
 from sheet_music_renderer import midi_to_svg
 from typing import Optional, Iterable
 import cairosvg
 import json
+import xml.etree.ElementTree as ET
 
 _resampling = getattr(Image, "Resampling", Image)
 RESAMPLE_LANCZOS = getattr(_resampling, "LANCZOS", getattr(_resampling, "BICUBIC", getattr(Image, "NEAREST", 0)))
+_CAIROSVG_DPI = 1200
 
 _WHITESPACE_THRESHOLD = 0.90
 _MIN_SYSTEM_HEIGHT = 18
@@ -44,19 +46,12 @@ class SheetMusicRenderer:
         self.system_boxes: list[tuple[int, int]] = []
         self.notehead_xs: list[int] = []
         self._notehead_xs_per_system: list[list[int]] = []
-        # index of the currently focused note (for centering). If None, use progress-based scrolling.
         self._current_note_idx: int = 0
-        # Smooth scrolling state: current view offset (float) and target offset (int)
         self._view_x_off: float = 0.0
         self._target_x_off: float = 0.0
-        # time constant for exponential smoothing (seconds)
         self._scroll_tau: float = 0.08
-        # smoothed screen play x (pixels within view) for the highlight rectangle/line
         self._screen_play_x: Optional[float] = None
-        # time constant for smoothing the play-line/rect movement
-        # make play overlay move faster (smaller tau = snappier)
         self._play_tau: float = 0.03
-        # last tick used for smoothing
         try:
             self._last_time_ms: int = pygame.time.get_ticks()
         except Exception:
@@ -81,26 +76,6 @@ class SheetMusicRenderer:
         key = f"{self.midi_path.name}_{mtime}_{size}"
         return key
 
-    @staticmethod
-    def _recolor_to_dark_theme(im: Image.Image) -> Image.Image:
-        base = Image.new("RGB", im.size, (255, 255, 255))
-        if im.mode != "RGBA":
-            rgba = im.convert("RGBA")
-        else:
-            rgba = im
-        base.paste(rgba, (0, 0), rgba)
-        gray = ImageOps.grayscale(base)
-        k = 255 - _BG_GRAY
-        lut = [int(255 - (k * v) / 255) for v in range(256)]
-        mapped = gray.point(lut)
-        rgb = Image.merge("RGB", (mapped, mapped, mapped))
-        try:
-            alpha = rgba.split()[3]
-        except IndexError:
-            alpha = Image.new("L", im.size, 255)
-        out = Image.merge("RGBA", (*rgb.split(), alpha))
-        return out
-
     def _prepare_strip(self) -> None:
         cache_dir = self._get_cache_dir()
         cache_key = self._midi_cache_key()
@@ -110,31 +85,27 @@ class SheetMusicRenderer:
         strip_png = cache_subdir / "strip.png"
         svg_out = cache_subdir / f"{self.midi_path.stem}.svg"
 
-        # Try to load cached note x positions if available (keep as floats for scaling)
         note_xs_cache = cache_subdir / "note_xs.json"
         if note_xs_cache.exists():
             try:
                 with note_xs_cache.open("r", encoding="utf-8") as fh:
                     raw = json.load(fh)
-                    # ensure floats; leave as floats for later scaling
                     self.notehead_xs = [float(x) for x in raw if x is not None]
             except Exception:
                 self.notehead_xs = []
 
-        # If we don't have a cached PNG or cached note positions, (re)render the SVG and convert
         if not strip_png.exists() or not self.notehead_xs:
             try:
                 try:
                     res = midi_to_svg(str(self.midi_path), str(cache_subdir))
                 except TypeError:
                     res = midi_to_svg(str(self.midi_path), str(cache_subdir), "mscore")
-                # res is a list of x positions (floats)
                 if isinstance(res, list):
-                    # save raw floats to cache file
                     try:
                         with note_xs_cache.open("w", encoding="utf-8") as fh:
                             json.dump([float(x) for x in res], fh)
-                    except Exception:
+                    except Exception as e:
+                        print("SheetMusicRenderer: failed to save note x positions:", e)
                         pass
 
                     self.notehead_xs = [float(x) for x in res]
@@ -151,27 +122,11 @@ class SheetMusicRenderer:
                 print("No SVG produced by sheet_music_renderer; aborting strip preparation.")
                 return
 
-            converted = False
             try:
-                cairosvg.svg2png(url=str(svg_out), write_to=str(strip_png), dpi=600)
-                converted = True
-            except Exception:
-                pass
-
-            if not converted:
-                import subprocess
-                try:
-                    subprocess.run(["rsvg-convert", str(svg_out), "-o", str(strip_png)], check=True)
-                    converted = True
-                except Exception:
-                    try:
-                        subprocess.run(["inkscape", str(svg_out), "--export-type=png", "--export-filename", str(strip_png)], check=True)
-                        converted = True
-                    except Exception:
-                        converted = False
-
-            if not converted:
-                print("Failed to convert SVG to PNG. Install 'cairosvg' Python package or 'rsvg-convert' / 'inkscape' command-line tools.")
+                cairosvg.svg2png(url=str(svg_out), write_to=str(strip_png), dpi=_CAIROSVG_DPI, scale=2, negate_colors=True, background_color=f"#{_BG_RGBA[0]:02x}{_BG_RGBA[1]:02x}{_BG_RGBA[2]:02x}")
+            except Exception as e:
+                print(
+                    "Failed to convert SVG to PNG: ", e)
                 return
 
         try:
@@ -180,7 +135,19 @@ class SheetMusicRenderer:
             print("Failed to open generated PNG:", e)
             return
 
-        # Crop transparent/empty borders if present and record left crop
+        svg_width = None
+        try:
+            if svg_out.exists():
+                tree = ET.parse(str(svg_out))
+                root = tree.getroot()
+                w = root.get('width') or root.get('{http://www.w3.org/2000/svg}width')
+                if w:
+                    if isinstance(w, str) and w.endswith('px'):
+                        w = w[:-2]
+                    svg_width = float(w)
+        except Exception:
+            svg_width = None
+
         left_crop = 0
         try:
             bbox = ImageOps.invert(im.convert("L")).getbbox()
@@ -195,17 +162,17 @@ class SheetMusicRenderer:
         cropped_w = im.width
 
         try:
-            recolored = self._recolor_to_dark_theme(im)
-        except Exception:
-            recolored = im
-
-        try:
-            scale = self.strip_height / float(max(1, recolored.height))
-            new_w = max(1, int(recolored.width * scale))
-            strip_resized = recolored.resize((new_w, self.strip_height), RESAMPLE_LANCZOS).convert("RGBA")
+            scale = self.strip_height / float(max(1, im.height))
+            new_w = max(1, int(im.width * scale))
+            strip_resized = im.resize((new_w, self.strip_height), RESAMPLE_LANCZOS).convert("RGBA")
         except Exception as e:
             print("Failed to resize strip image:", e)
             return
+
+        try:
+            strip_resized = strip_resized.filter(ImageFilter.UnsharpMask(radius=0.5, percent=150, threshold=2))
+        except Exception:
+            pass
 
         data = strip_resized.tobytes()
         try:
@@ -216,17 +183,24 @@ class SheetMusicRenderer:
 
         self.full_width = strip_resized.size[0]
 
-        # If we loaded SVG-derived note x positions, adjust them for crop & resize into final pixel coords
         if self.notehead_xs:
             try:
+                if svg_width and svg_width > 0:
+                    pixels_per_svg_unit = float(cropped_w) / float(svg_width)
+                else:
+                    pixels_per_svg_unit = 1.0
+
                 final_scale = float(strip_resized.width) / float(max(1, cropped_w))
                 pxs = []
                 for x in self.notehead_xs:
-                    # subtract left crop (positions were relative to original SVG/PNG before cropping)
-                    x_adj = float(x) - float(left_crop)
-                    if x_adj < 0 or x_adj > float(cropped_w):
+                    try:
+                        x_px = float(x) * pixels_per_svg_unit
+                    except Exception:
                         continue
-                    pxs.append(int(round(x_adj * final_scale)))
+                    x_adj_px = x_px - float(left_crop)
+                    if x_adj_px < 0 or x_adj_px > float(cropped_w):
+                        continue
+                    pxs.append(int(round(x_adj_px * final_scale)))
                 pxs = sorted(set(pxs))
                 self.notehead_xs = pxs
             except Exception as e:
