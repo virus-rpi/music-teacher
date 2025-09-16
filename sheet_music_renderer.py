@@ -298,7 +298,6 @@ def strip_duplicate_clefs(svg: SVG) -> SVG:
     print("done.")
     return svg
 
-
 def bracket_groups_to_long_strip(svg: SVG) -> SVG:
     print("Laying out bracket groups into one long strip...", end="")
 
@@ -396,11 +395,40 @@ def midi_to_svg(midi_file: str, out_dir: str, mscore_cmd="mscore"):
     grouped_out = out_dir / (midi_path.stem + ".svg")
     grouped.write_xml(str(grouped_out))
 
+    note_xs: list[float] = []
+    try:
+        for elem in grouped.elements():
+            candidates = [elem]
+            if hasattr(elem, 'elements'):
+                candidates = list(elem.elements())
+            for e in candidates:
+                try:
+                    vals = getattr(e, 'values', {}) or {}
+                    cls = vals.get('class', '')
+                except Exception:
+                    cls = ''
+                if 'Note' in str(cls):
+                    try:
+                        bb = e.bbox()
+                        if bb:
+                            x = (bb[0] + bb[2]) / 2.0
+                            note_xs.append(float(x))
+                        else:
+                            note_xs.append(float(find_x_coordinate(e)))
+                    except Exception:
+                        try:
+                            note_xs.append(float(find_x_coordinate(e)))
+                        except Exception:
+                            continue
+    except Exception:
+        note_xs = []
+
     for p in fixed_paths:
         if p != grouped_out and p.exists():
             p.unlink()
 
     print(f"Done. Final merged SVG: {grouped_out}")
+    return list(set(note_xs))
 
 if __name__ == "__main__":
     midi_to_svg(

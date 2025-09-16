@@ -82,7 +82,12 @@ def midi_listener():
                     if synth_enabled:
                         synth.note_on(msg.note, msg.velocity)
                 if teaching_mode:
-                    midi_teacher.advance_if_pressed(pressed_notes_set)
+                    advanced = midi_teacher.advance_if_pressed(pressed_notes_set)
+                    if advanced:
+                        try:
+                            sheet_music_renderer.advance_note()
+                        except Exception:
+                            pass
             elif msg.type in ("note_off", "note_on"):
                 pressed_keys[msg.note] = False
                 pressed_fade_keys.pop(msg.note, None)
@@ -114,11 +119,19 @@ while running:
                 print(f"Teaching mode: {teaching_mode}")
                 midi_teacher.reset()
                 pressed_notes_set.clear()
+                try:
+                    sheet_music_renderer.reset_note_index()
+                except Exception:
+                    pass
             # Debug: advance teacher by one chord when pressing 'd'
             if event.key == pygame.K_d and teaching_mode:
                 advanced = midi_teacher.advance_one()
                 if advanced:
                     print("[Debug] Advanced teacher by one chord.")
+                    try:
+                        sheet_music_renderer.advance_note()
+                    except Exception:
+                        pass
                 else:
                     print("[Debug] Already at end; cannot advance.")
     highlighted_notes = midi_teacher.get_next_notes() if teaching_mode else set()
