@@ -10,6 +10,7 @@ class MidiTeacher:
         self.loop_enabled = False
         self.loop_start = 0
         self.loop_end = max(0, len(self.chords) - 1)
+        self._last_wrapped = False
 
     def _extract_chords(self):
         mid = mido.MidiFile(self.midi_path)
@@ -47,18 +48,20 @@ class MidiTeacher:
         return {}
 
     def advance_if_pressed(self, pressed_notes):
+        self._last_wrapped = False
         next_notes = self.get_next_notes()
         if next_notes and set(next_notes.keys()).issubset(pressed_notes):
             self.current_index += 1
-            # If loop enabled and we've passed the end, wrap back to loop_start
             if self.loop_enabled and self.current_index > self.loop_end:
                 self.current_index = self.loop_start
+                self._last_wrapped = True
             return True
         return False
 
     def reset(self):
         self.current_index = 0
         self._pending_notes = set()
+        self._last_wrapped = False
 
     def get_progress(self):
         if not self.chords:
@@ -67,11 +70,13 @@ class MidiTeacher:
 
     # Debug helper: force-advance by one chord regardless of pressed notes
     def advance_one(self):
+        # clear wrap flag for this attempt
+        self._last_wrapped = False
         if self.current_index < len(self.chords):
             self.current_index += 1
-            # wrap with loop
             if self.loop_enabled and self.current_index > self.loop_end:
                 self.current_index = self.loop_start
+                self._last_wrapped = True
             return True
         return False
 
@@ -82,6 +87,7 @@ class MidiTeacher:
             self.current_index = 0
             return
         self.current_index = max(0, min(int(index), len(self.chords) - 1))
+        self._last_wrapped = False
 
     def seek_relative(self, delta: int):
         """Move forward/backward by delta chords."""
@@ -114,6 +120,7 @@ class MidiTeacher:
         self.loop_start = idx
         if self.loop_end < self.loop_start:
             self.loop_end = self.loop_start
+        self._last_wrapped = False
 
     def set_loop_end_index(self, index: int):
         """Set loop end to a specific chord index (clamped)."""
@@ -125,15 +132,24 @@ class MidiTeacher:
         self.loop_end = idx
         if self.loop_start > self.loop_end:
             self.loop_start = self.loop_end
+        self._last_wrapped = False
 
     def toggle_loop(self):
         self.loop_enabled = not self.loop_enabled
+        self._last_wrapped = False
 
     def get_loop_range(self):
-        return (self.loop_start, self.loop_end, self.loop_enabled)
+        return self.loop_start, self.loop_end, self.loop_enabled
 
     def get_total_chords(self):
         return len(self.chords)
 
     def get_current_index(self):
         return int(self.current_index)
+
+    def did_wrap_and_clear(self) -> bool:
+        """Return True if the most recent advance wrapped back to loop_start; clears the flag."""
+        w = bool(self._last_wrapped)
+        self._last_wrapped = False
+        return w
+

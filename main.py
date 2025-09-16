@@ -88,7 +88,10 @@ def midi_listener():
                     advanced = midi_teacher.advance_if_pressed(pressed_notes_set)
                     if advanced:
                         try:
-                            sheet_music_renderer.advance_note()
+                            if midi_teacher.did_wrap_and_clear():
+                                sheet_music_renderer.seek_to_progress(midi_teacher.get_progress())
+                            else:
+                                sheet_music_renderer.advance_note()
                         except Exception:
                             pass
             elif msg.type in ("note_off", "note_on"):
@@ -132,7 +135,10 @@ while running:
                 if advanced:
                     print("[Debug] Advanced teacher by one chord.")
                     try:
-                        sheet_music_renderer.advance_note()
+                        if midi_teacher.did_wrap_and_clear():
+                            sheet_music_renderer.seek_to_progress(midi_teacher.get_progress())
+                        else:
+                            sheet_music_renderer.advance_note()
                     except Exception:
                         pass
                 else:
