@@ -3,7 +3,7 @@ import mido
 class MidiTeacher:
     def __init__(self, midi_path):
         self.midi_path = midi_path
-        self.chords = self._extract_chords()
+        self.chords, self.chord_times = self._extract_chords()
         self.current_index = 0
         self._pending_notes = set()
         self.loop_enabled = False
@@ -18,25 +18,29 @@ class MidiTeacher:
             abs_time = 0
             for msg in track:
                 abs_time += msg.time
-                if msg.type == 'note_on' and msg.velocity > 0:
+                if msg.type == 'note_on' and getattr(msg, 'velocity', 0) > 0:
                     events.append((abs_time, msg.note, track_idx))
         events.sort()
         chords_dict = {}
         for t, note, track_idx in events:
             chords_dict.setdefault(t, []).append((note, track_idx))
+        sorted_times = sorted(chords_dict.keys())
         track_note_counts = {}
         for _, note, track_idx in events:
             track_note_counts[track_idx] = track_note_counts.get(track_idx, 0) + 1
         sorted_tracks = sorted(track_note_counts, key=track_note_counts.get, reverse=True)
         if len(sorted_tracks) < 2:
-            hand_map = {sorted_tracks[0]: 'R'}
+            hand_map = {sorted_tracks[0]: 'R'} if sorted_tracks else {}
         else:
             hand_map = {sorted_tracks[0]: 'R', sorted_tracks[1]: 'L'}
         chords = []
-        for notes in chords_dict.values():
+        times = []
+        for t in sorted_times:
+            notes = chords_dict[t]
             chord = [(note, hand_map.get(track_idx, 'R')) for note, track_idx in notes]
             chords.append(chord)
-        return chords
+            times.append(t)
+        return chords, times
 
     def get_next_notes(self):
         if self.current_index < len(self.chords):
@@ -138,3 +142,18 @@ class MidiTeacher:
         w = bool(self._last_wrapped)
         self._last_wrapped = False
         return w
+
+    def get_chord_times(self):
+        return list(self.chord_times)
+
+    def get_chords_segment(self, start_idx: int, count: int):
+        if not self.chords:
+            return [], []
+        start = max(0, min(int(start_idx), len(self.chords) - 1))
+        end = max(start, min(start + int(count), len(self.chords)))
+        return self.chords[start:end], self.chord_times[start:end]
+
+    def get_remaining_chords_count(self, start_idx: int):
+        if not self.chords:
+            return 0
+        return max(0, len(self.chords) - max(0, int(start_idx)))
