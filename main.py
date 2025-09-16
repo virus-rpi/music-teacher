@@ -1,7 +1,7 @@
 import pygame
 import mido
 import threading
-from visual import draw_piano, draw_progress_bar
+from visual import draw_piano, draw_progress_bar, draw_ui_overlay
 from synth import Synth, PEDAL_CC
 from midi_teach import MidiTeacher
 from sheet_music import SheetMusicRenderer
@@ -55,6 +55,9 @@ dims = {
 synth = Synth(SOUNDFONT_PATH)
 midi_teacher = MidiTeacher(MIDI_TEACH_PATH)
 sheet_music_renderer = SheetMusicRenderer(MIDI_TEACH_PATH, SCREEN_WIDTH)
+
+font_small = pygame.font.SysFont("Segoe UI", 16)
+font_medium = pygame.font.SysFont("Segoe UI", 20, bold=True)
 
 def midi_listener():
     try:
@@ -111,6 +114,7 @@ while running:
             event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
             running = False
         if event.type == pygame.KEYDOWN:
+            # Keyboard controls for synth/teaching and seeking
             if event.key == pygame.K_s:
                 synth_enabled = not synth_enabled
                 print(f"Synth enabled: {synth_enabled}")
@@ -123,7 +127,6 @@ while running:
                     sheet_music_renderer.reset_note_index()
                 except Exception:
                     pass
-            # Debug: advance teacher by one chord when pressing 'd'
             if event.key == pygame.K_d and teaching_mode:
                 advanced = midi_teacher.advance_one()
                 if advanced:
@@ -134,9 +137,91 @@ while running:
                         pass
                 else:
                     print("[Debug] Already at end; cannot advance.")
+
+            # Seeking controls
+            if event.key in (pygame.K_RIGHT, pygame.K_LEFT):
+                # compute step based on modifiers
+                step = 1
+                mods = pygame.key.get_mods()
+                if mods & pygame.KMOD_SHIFT:
+                    step = 10
+                elif mods & pygame.KMOD_CTRL:
+                    step = 5
+                if event.key == pygame.K_LEFT:
+                    step = -step
+                midi_teacher.seek_relative(step)
+                # sync sheet music view to teacher progress
+                try:
+                    sheet_music_renderer.seek_to_progress(midi_teacher.get_progress())
+                except Exception:
+                    pass
+
+            # loop controls: set start/end and toggle
+            if event.key == pygame.K_COMMA:  # ','
+                midi_teacher.set_loop_start()
+                ls, le, _ = midi_teacher.get_loop_range()
+                print(f"Set loop start to {ls}")
+            if event.key == pygame.K_PERIOD:  # '.'
+                midi_teacher.set_loop_end()
+                ls, le, _ = midi_teacher.get_loop_range()
+                print(f"Set loop end to {le}")
+            if event.key == pygame.K_l:
+                midi_teacher.toggle_loop()
+                print(f"Loop enabled: {midi_teacher.loop_enabled}")
+
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            # Click on progress bar to seek
+            mx, my = event.pos
+            bar_height = 28
+            bar_margin = 24
+            bar_width = int(SCREEN_WIDTH * 0.7)
+            bx = int((SCREEN_WIDTH - bar_width) / 2)
+            by = bar_margin
+            if bx <= mx <= bx + bar_width and by <= my <= by + bar_height:
+                rel = (mx - bx) / float(bar_width)
+                rel = max(0.0, min(1.0, rel))
+                total = midi_teacher.get_total_chords()
+                if total > 0:
+                    idx = int(round(rel * (total - 1)))
+                else:
+                    idx = 0
+
+                mods = pygame.key.get_mods()
+                if event.button == 1 and not (mods & (pygame.KMOD_SHIFT | pygame.KMOD_CTRL)):
+                    midi_teacher.seek_to_progress(rel)
+                    try:
+                        sheet_music_renderer.seek_to_progress(midi_teacher.get_progress())
+                    except Exception:
+                        pass
+                elif event.button == 1 and (mods & pygame.KMOD_SHIFT):
+                    # shift+left-click: set loop start
+                    midi_teacher.set_loop_start_index(idx)
+                    ls, le, _ = midi_teacher.get_loop_range()
+                    print(f"Set loop start to {ls}")
+                elif event.button == 1 and (mods & pygame.KMOD_CTRL):
+                    # ctrl+left-click: set loop end
+                    midi_teacher.set_loop_end_index(idx)
+                    ls, le, _ = midi_teacher.get_loop_range()
+                    print(f"Set loop end to {le}")
+                elif event.button == 2:
+                    # middle click: set loop start
+                    midi_teacher.set_loop_start_index(idx)
+                    ls, le, _ = midi_teacher.get_loop_range()
+                    print(f"Set loop start to {ls}")
+                elif event.button == 3:
+                    # right click: set loop end
+                    midi_teacher.set_loop_end_index(idx)
+                    ls, le, _ = midi_teacher.get_loop_range()
+                    print(f"Set loop end to {le}")
+
+                pressed_notes_set.clear()
+
     highlighted_notes = midi_teacher.get_next_notes() if teaching_mode else set()
     draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, highlighted_notes)
-    draw_progress_bar(screen, midi_teacher.get_progress(), dims) if teaching_mode else None
+    if teaching_mode:
+        draw_ui_overlay(screen, midi_teacher, dims, font_small, font_medium)
+    else:
+        draw_progress_bar(screen, midi_teacher.get_progress(), dims)
     sheet_music_renderer.draw(screen, dims['PEDAL_Y'] + dims['PEDAL_HEIGHT'] + 32, midi_teacher.get_progress())
     pygame.display.flip()
     clock.tick(60)

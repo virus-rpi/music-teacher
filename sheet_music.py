@@ -376,3 +376,28 @@ class SheetMusicRenderer:
         # jump view to start immediately
         self._view_x_off = 0.0
         self._target_x_off = 0.0
+
+    def seek_to_progress(self, progress: float) -> None:
+        """Seek the visible strip to the given progress (0.0-1.0). If visual noteheads exist, choose nearest visual note index."""
+        if self.full_surface is None:
+            return
+        view_w = int(self.screen_width)
+        max_off = max(0, self.full_width - view_w)
+        p = max(0.0, min(1.0, float(progress)))
+        # Prefer snapping to nearest detected visual note
+        if self.notehead_xs:
+            idx = int(round(p * (len(self.notehead_xs) - 1)))
+            idx = max(0, min(idx, len(self.notehead_xs) - 1))
+            self._current_note_idx = idx
+            play_x = int(view_w * 0.45)
+            tgt = int(self.notehead_xs[int(self._current_note_idx)]) - play_x
+            tgt = max(0, min(tgt, max_off))
+            self._target_x_off = float(tgt)
+            # also set view immediately so user sees immediate jump
+            self._view_x_off = float(self._target_x_off)
+            self._screen_play_x = float(int(self.notehead_xs[int(self._current_note_idx)]) - int(self._view_x_off))
+        else:
+            tgt = int(p * max_off)
+            self._target_x_off = float(tgt)
+            self._view_x_off = float(self._target_x_off)
+            self._screen_play_x = float(int(view_w * 0.45))

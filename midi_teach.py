@@ -6,6 +6,10 @@ class MidiTeacher:
         self.chords = self._extract_chords()
         self.current_index = 0
         self._pending_notes = set()
+        # Loop/practice range state
+        self.loop_enabled = False
+        self.loop_start = 0
+        self.loop_end = max(0, len(self.chords) - 1)
 
     def _extract_chords(self):
         mid = mido.MidiFile(self.midi_path)
@@ -46,6 +50,9 @@ class MidiTeacher:
         next_notes = self.get_next_notes()
         if next_notes and set(next_notes.keys()).issubset(pressed_notes):
             self.current_index += 1
+            # If loop enabled and we've passed the end, wrap back to loop_start
+            if self.loop_enabled and self.current_index > self.loop_end:
+                self.current_index = self.loop_start
             return True
         return False
 
@@ -62,5 +69,71 @@ class MidiTeacher:
     def advance_one(self):
         if self.current_index < len(self.chords):
             self.current_index += 1
+            # wrap with loop
+            if self.loop_enabled and self.current_index > self.loop_end:
+                self.current_index = self.loop_start
             return True
         return False
+
+    # New control methods
+    def seek_to_index(self, index: int):
+        """Seek directly to a chord index (clamped)."""
+        if not self.chords:
+            self.current_index = 0
+            return
+        self.current_index = max(0, min(int(index), len(self.chords) - 1))
+
+    def seek_relative(self, delta: int):
+        """Move forward/backward by delta chords."""
+        self.seek_to_index(self.current_index + int(delta))
+
+    def seek_to_progress(self, progress: float):
+        """Seek to a relative progress (0.0-1.0) mapping to chord index."""
+        if not self.chords:
+            return
+        p = max(0.0, min(1.0, float(progress)))
+        idx = int(round(p * (len(self.chords) - 1)))
+        self.seek_to_index(idx)
+
+    def set_loop_start(self):
+        """Set the loop/practice start to current position."""
+        self.set_loop_start_index(self.current_index)
+
+    def set_loop_end(self):
+        """Set the loop/practice end to current position."""
+        self.set_loop_end_index(self.current_index)
+
+    def set_loop_start_index(self, index: int):
+        """Set loop start to a specific chord index (clamped)."""
+        print(f"Set loop start to {index}")
+        if not self.chords:
+            self.loop_start = 0
+            self.loop_end = 0
+            return
+        idx = max(0, min(int(index), len(self.chords) - 1))
+        self.loop_start = idx
+        if self.loop_end < self.loop_start:
+            self.loop_end = self.loop_start
+
+    def set_loop_end_index(self, index: int):
+        """Set loop end to a specific chord index (clamped)."""
+        if not self.chords:
+            self.loop_start = 0
+            self.loop_end = 0
+            return
+        idx = max(0, min(int(index), len(self.chords) - 1))
+        self.loop_end = idx
+        if self.loop_start > self.loop_end:
+            self.loop_start = self.loop_end
+
+    def toggle_loop(self):
+        self.loop_enabled = not self.loop_enabled
+
+    def get_loop_range(self):
+        return (self.loop_start, self.loop_end, self.loop_enabled)
+
+    def get_total_chords(self):
+        return len(self.chords)
+
+    def get_current_index(self):
+        return int(self.current_index)
