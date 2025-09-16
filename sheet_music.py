@@ -1,4 +1,5 @@
 from pathlib import Path
+import math
 import pygame
 from PIL import Image, ImageOps
 from sheet_music_renderer import midi_to_svg
@@ -31,7 +32,7 @@ _SPLIT_CACHE_VERSION = "v1"
 
 
 class SheetMusicRenderer:
-    def __init__(self, midi_path: str | Path, screen_width: int, height: int = 260, debug: bool = True) -> None:
+    def __init__(self, midi_path: str | Path, screen_width: int, height: int = 260, debug: bool = False) -> None:
         self.midi_path = Path(midi_path)
         self.screen_width = int(screen_width)
         self.strip_height = int(height)
@@ -45,6 +46,21 @@ class SheetMusicRenderer:
         self._notehead_xs_per_system: list[list[int]] = []
         # index of the currently focused note (for centering). If None, use progress-based scrolling.
         self._current_note_idx: int = 0
+        # Smooth scrolling state: current view offset (float) and target offset (int)
+        self._view_x_off: float = 0.0
+        self._target_x_off: float = 0.0
+        # time constant for exponential smoothing (seconds)
+        self._scroll_tau: float = 0.08
+        # smoothed screen play x (pixels within view) for the highlight rectangle/line
+        self._screen_play_x: Optional[float] = None
+        # time constant for smoothing the play-line/rect movement
+        # make play overlay move faster (smaller tau = snappier)
+        self._play_tau: float = 0.03
+        # last tick used for smoothing
+        try:
+            self._last_time_ms: int = pygame.time.get_ticks()
+        except Exception:
+            self._last_time_ms = 0
 
         self._prepare_strip()
 
@@ -137,7 +153,7 @@ class SheetMusicRenderer:
 
             converted = False
             try:
-                cairosvg.svg2png(url=str(svg_out), write_to=str(strip_png), dpi=300)
+                cairosvg.svg2png(url=str(svg_out), write_to=str(strip_png), dpi=600)
                 converted = True
             except Exception:
                 pass
@@ -231,26 +247,72 @@ class SheetMusicRenderer:
         if self.full_surface is None:
             return
         view_w = self.screen_width
-        # Default x offset is based on progress
-        x_off = 0
+
+        # Compute desired target offset for this frame (based on current note index or progress)
+        max_off = max(0, self.full_width - view_w)
         if self.notehead_xs and 0 <= int(self._current_note_idx) < len(self.notehead_xs):
-            # center current note at the play_x position
             play_x = int(view_w * 0.45)
             target_x = int(self.notehead_xs[int(self._current_note_idx)])
-            x_off = int(target_x - play_x)
-            # clamp
-            max_off = max(0, self.full_width - view_w)
-            if x_off < 0:
-                x_off = 0
-            if x_off > max_off:
-                x_off = max_off
+            desired = int(target_x - play_x)
+            if desired < 0:
+                desired = 0
+            if desired > max_off:
+                desired = max_off
+            self._target_x_off = float(desired)
         else:
             p = min(max(progress, 0.0), 1.0)
-            x_off = int(p * max(0, (self.full_width - view_w)))
+            self._target_x_off = float(int(p * max_off))
+
+        # update smoothing based on elapsed time
+        now_ms = pygame.time.get_ticks()
+        dt = max(0.0, (now_ms - getattr(self, '_last_time_ms', now_ms)) / 1000.0)
+        self._last_time_ms = now_ms
+        if dt > 0.0:
+            # exponential smoothing factor
+            alpha = 1.0 - math.exp(-dt / max(1e-6, self._scroll_tau))
+            self._view_x_off += (self._target_x_off - self._view_x_off) * alpha
+            # snap if very close
+            if abs(self._target_x_off - self._view_x_off) < 0.5:
+                self._view_x_off = float(self._target_x_off)
+
+        x_off = int(round(max(0.0, min(self._view_x_off, float(max_off)))))
         src_rect = pygame.Rect(x_off, 0, view_w, self.strip_height)
         screen.blit(self.full_surface, (0, y), src_rect)
-        play_x = int(view_w * 0.45)
-        pygame.draw.line(screen, (0, 200, 255), (play_x, y), (play_x, y + self.strip_height), 3)
+        # Determine desired screen play position (relative to view) and smooth it
+        if self.notehead_xs and 0 <= int(self._current_note_idx) < len(self.notehead_xs):
+            desired_screen_play = float(int(self.notehead_xs[int(self._current_note_idx)]) - x_off)
+        else:
+            desired_screen_play = float(int(view_w * 0.45))
+
+        # initialize smoothed value if needed
+        if self._screen_play_x is None:
+            self._screen_play_x = desired_screen_play
+
+        # smooth the play x using the same dt as the view smoothing (frame-time)
+        dt_play = dt if dt > 0.0 else (1.0 / 60.0)
+        alpha_play = 1.0 - math.exp(-dt_play / max(1e-6, self._play_tau))
+        self._screen_play_x += (desired_screen_play - self._screen_play_x) * alpha_play
+        # snap if very close to avoid tiny subpixel jitter
+        if abs(desired_screen_play - self._screen_play_x) < 0.5:
+            self._screen_play_x = float(desired_screen_play)
+
+        screen_play_x = float(self._screen_play_x)
+
+        # Draw semi-transparent highlight rectangle (about 30px wide) and a semi-transparent vertical line
+        overlay = pygame.Surface((view_w, self.strip_height), pygame.SRCALPHA)
+        rect_w = 30
+        rect_h = self.strip_height
+        rect_x = int(round(screen_play_x - rect_w // 2))
+        rect_y = 0
+        # rectangle color (semi-transparent cyan)
+        rect_color = (0, 200, 255, 128)
+        pygame.draw.rect(overlay, rect_color, (rect_x, rect_y, rect_w, rect_h))
+        # vertical line (slightly more opaque)
+        line_color = (0, 200, 255, 200)
+        pygame.draw.line(overlay, line_color, (int(round(screen_play_x)), 0), (int(round(screen_play_x)), rect_h), 3)
+        # blit overlay onto screen at the strip position
+        screen.blit(overlay, (0, y))
+
         if self.debug:
             # draw a green vertical line at every note position
             positions = set()
@@ -270,11 +332,13 @@ class SheetMusicRenderer:
                     pygame.draw.line(screen, (90, 255, 120), (int(sx), y), (int(sx), y + self.strip_height), 1)
         if highlight_pitches:
             to_draw: list[tuple[int, tuple[int, int, int]]] = []
+            # absolute play-line X in strip coordinates (used to choose nearest visual note)
+            abs_play_x = x_off + int(round(screen_play_x))
             for midi in highlight_pitches:
                 xs = self.note_to_xs.get(int(midi), [])
                 if not xs:
                     continue
-                abs_play_x = x_off + play_x
+                # Use the actual absolute play-line X when selecting which visual note to highlight
                 best = min(xs, key=lambda xv: abs(xv - abs_play_x))
                 screen_x = best - x_off
                 color = (0, 200, 255) if int(midi) >= 60 else (255, 140, 60)
@@ -294,12 +358,21 @@ class SheetMusicRenderer:
             if not self.notehead_xs:
                 return
             self._current_note_idx = min(len(self.notehead_xs) - 1, int(self._current_note_idx) + 1)
+            # compute and set target offset immediately so smooth scroll begins
+            view_w = int(self.screen_width)
+            play_x = int(view_w * 0.45)
+            max_off = max(0, self.full_width - view_w)
+            tgt = int(self.notehead_xs[int(self._current_note_idx)]) - play_x
+            tgt = max(0, min(tgt, max_off))
+            self._target_x_off = float(tgt)
             if self.debug:
-                print(f"Advanced current note index to {self._current_note_idx}")
+                print(f"Advanced current note index to {self._current_note_idx}, target offset {self._target_x_off}")
         except Exception:
             pass
 
     def reset_note_index(self) -> None:
         """Reset the current note index to the start."""
         self._current_note_idx = 0
-
+        # jump view to start immediately
+        self._view_x_off = 0.0
+        self._target_x_off = 0.0

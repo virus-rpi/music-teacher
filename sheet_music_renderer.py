@@ -407,7 +407,7 @@ def midi_to_svg(midi_file: str, out_dir: str, mscore_cmd="mscore"):
                     cls = vals.get('class', '')
                 except Exception:
                     cls = ''
-                if 'Note' in str(cls):
+                if str(cls) == "Note":
                     try:
                         bb = e.bbox()
                         if bb:
