@@ -131,3 +131,64 @@ def draw_progress_bar(screen, progress, dims):
     text = font.render(f"{percent}%", True, (255, 255, 255) if progress < 0.49 else (0, 0, 0))
     text_rect = text.get_rect(center=(screen_width // 2, y + bar_height // 2))
     screen.blit(text, text_rect)
+
+def draw_ui_overlay(screen, midi_teacher, dims, font_small=None, font_medium=None):
+    """Draw the top UI overlay: progress bar, loop markers, status and instructions.
+    If fonts are not provided, create reasonable defaults.
+    """
+    # create fonts if not supplied
+    if font_small is None:
+        font_small = pygame.font.SysFont("Segoe UI", 16)
+    if font_medium is None:
+        font_medium = pygame.font.SysFont("Segoe UI", 20, bold=True)
+
+    screen_width = dims['SCREEN_WIDTH']
+    screen_height = dims['SCREEN_HEIGHT']
+    bar_height = 28
+    bar_margin = 24
+    bar_width = int(screen_width * 0.7)
+    x = int((screen_width - bar_width) / 2)
+    y = bar_margin
+
+    total = midi_teacher.get_total_chords()
+    cur = midi_teacher.get_current_index()
+    progress = midi_teacher.get_progress() if total > 0 else 0.0
+
+    # Draw progress bar (base)
+    draw_progress_bar(screen, progress, dims)
+
+    loop_start, loop_end, loop_enabled = midi_teacher.get_loop_range()
+    if total > 0 and loop_enabled:
+        start_px = x + int((loop_start / max(1, total - 1)) * bar_width)
+        end_px = x + int((loop_end / max(1, total - 1)) * bar_width)
+        color = (0, 200, 255) if loop_enabled else (120, 120, 120)
+        pygame.draw.line(screen, color, (start_px, y), (start_px, y + bar_height), 3)
+        pygame.draw.line(screen, color, (end_px, y), (end_px, y + bar_height), 3)
+        shade = pygame.Surface((max(1, end_px - start_px), bar_height), pygame.SRCALPHA)
+        shade.fill((*color, 40))
+        screen.blit(shade, (start_px, y))
+
+    margin = 16
+
+    status = f"Chord {cur}/{total}   Loop: {'ON' if loop_enabled else 'OFF'}"
+    txt = font_medium.render(status, True, (220, 220, 220))
+    txt_w, txt_h = txt.get_size()
+    status_y = max(margin, screen_height - margin - txt_h*4)
+    screen.blit(txt, (margin, status_y))
+
+    instr_lines = [
+        "Click progress bar to seek.",
+        "<- / -> : step by 1 chord. Shift for 10, Ctrl for 5.",
+        ", : set loop start at current. . : set loop end at current. L : toggle loop.",
+        "T : toggle teaching mode. D : debug advance. S : toggle synth."
+    ]
+    line_h = font_small.get_height()
+    padding_between = 4
+    total_h = len(instr_lines) * (line_h + padding_between)
+    instr_top = max(margin, screen_height - margin - total_h*1.8)
+    for i, line in enumerate(instr_lines):
+        it = font_small.render(line, True, (180, 180, 180))
+        iw, ih = it.get_size()
+        px = screen_width - margin - iw
+        py = instr_top + i * (line_h + padding_between)
+        screen.blit(it, (px, py))
