@@ -29,7 +29,6 @@ class MidiTeacher:
             track_note_counts[track_idx] = track_note_counts.get(track_idx, 0) + 1
         sorted_tracks = sorted(track_note_counts, key=track_note_counts.get, reverse=True)
         if len(sorted_tracks) < 2:
-            # Fallback: all notes right hand
             hand_map = {sorted_tracks[0]: 'R'}
         else:
             hand_map = {sorted_tracks[0]: 'R', sorted_tracks[1]: 'L'}
@@ -48,11 +47,7 @@ class MidiTeacher:
         self._last_wrapped = False
         next_notes = self.get_next_notes()
         if next_notes and set(next_notes.keys()).issubset(pressed_notes):
-            self.current_index += 1
-            if self.loop_enabled and self.current_index > self.loop_end:
-                self.current_index = self.loop_start
-                self._last_wrapped = True
-            return True
+            return self.advance_one()
         return False
 
     def reset(self):
@@ -61,23 +56,26 @@ class MidiTeacher:
         self._last_wrapped = False
 
     def get_progress(self):
-        if not self.chords:
+        total = len(self.chords)
+        if total == 0:
             return 1.0
-        return self.current_index / len(self.chords)
+        return self.current_index / max(1, total - 1)
 
-    # Debug helper: force-advance by one chord regardless of pressed notes
     def advance_one(self):
         self._last_wrapped = False
-        if self.current_index < len(self.chords):
-            self.current_index += 1
-            if self.loop_enabled and self.current_index > self.loop_end:
-                self.current_index = self.loop_start
-                self._last_wrapped = True
-            return True
-        return False
+        if not self.chords:
+            return False
+        if self.current_index >= len(self.chords) - 1 and not self.loop_enabled:
+            return False
+        candidate = self.current_index + 1
+        if self.loop_enabled and candidate > self.loop_end:
+            self.current_index = self.loop_start
+            self._last_wrapped = True
+        else:
+            self.current_index = min(candidate, len(self.chords) - 1)
+        return True
 
     def seek_to_index(self, index: int):
-        """Seek directly to a chord index (clamped)."""
         if not self.chords:
             self.current_index = 0
             return
@@ -85,11 +83,9 @@ class MidiTeacher:
         self._last_wrapped = False
 
     def seek_relative(self, delta: int):
-        """Move forward/backward by delta chords."""
         self.seek_to_index(self.current_index + int(delta))
 
     def seek_to_progress(self, progress: float):
-        """Seek to a relative progress (0.0-1.0) mapping to chord index."""
         if not self.chords:
             return
         p = max(0.0, min(1.0, float(progress)))
@@ -97,15 +93,12 @@ class MidiTeacher:
         self.seek_to_index(idx)
 
     def set_loop_start(self):
-        """Set the loop/practice start to current position."""
         self.set_loop_start_index(self.current_index)
 
     def set_loop_end(self):
-        """Set the loop/practice end to current position."""
         self.set_loop_end_index(self.current_index)
 
     def set_loop_start_index(self, index: int):
-        """Set loop start to a specific chord index (clamped)."""
         print(f"Set loop start to {index}")
         if not self.chords:
             self.loop_start = 0
@@ -118,7 +111,6 @@ class MidiTeacher:
         self._last_wrapped = False
 
     def set_loop_end_index(self, index: int):
-        """Set loop end to a specific chord index (clamped)."""
         if not self.chords:
             self.loop_start = 0
             self.loop_end = 0
@@ -143,8 +135,6 @@ class MidiTeacher:
         return int(self.current_index)
 
     def did_wrap_and_clear(self) -> bool:
-        """Return True if the most recent advance wrapped back to loop_start; clears the flag."""
         w = bool(self._last_wrapped)
         self._last_wrapped = False
         return w
-
