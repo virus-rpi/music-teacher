@@ -1,10 +1,11 @@
 import pygame
 import mido
 import threading
-from visual import draw_piano, draw_progress_bar, draw_ui_overlay, BG_COLOR
+from visual import draw_piano, draw_ui_overlay, BG_COLOR
 from synth import Synth, PEDAL_CC
 from midi_teach import MidiTeacher
 from sheet_music import SheetMusicRenderer
+import math
 
 LOWEST_NOTE = 21   # A0
 HIGHEST_NOTE = 108 # C8
@@ -34,8 +35,25 @@ pressed_keys = {}
 pressed_fade_keys = {}
 pedals = {"soft": False, "sostenuto": False, "sustain": False}
 synth_enabled = True
-teaching_mode = True  # Set to True to enable teaching mode
+teaching_mode = True
 pressed_notes_set = set()
+
+piano_y_default = PIANO_Y_OFFSET
+piano_y_center = (SCREEN_HEIGHT - WHITE_KEY_HEIGHT - PEDAL_HEIGHT) // 2
+piano_y_current = float(piano_y_default)
+piano_y_target = float(piano_y_default)
+
+overlay_alpha_current = 1.0 if teaching_mode else 0.0
+overlay_alpha_target = overlay_alpha_current
+sheet_alpha_current = 1.0 if teaching_mode else 0.0
+sheet_alpha_target = sheet_alpha_current
+piano_tau = 0.12
+alpha_tau = 0.18
+
+try:
+    last_time_ms = pygame.time.get_ticks()
+except Exception:
+    last_time_ms = 0
 
 dims = {
     'SCREEN_WIDTH': SCREEN_WIDTH,
@@ -87,8 +105,7 @@ def midi_listener():
                     if synth_enabled:
                         synth.note_on(msg.note, msg.velocity)
                 if teaching_mode:
-                    advanced = midi_teacher.advance_if_pressed(pressed_notes_set)
-                    if advanced:
+                    if midi_teacher.advance_if_pressed(pressed_notes_set):
                         try:
                             if midi_teacher.did_wrap_and_clear():
                                 sheet_music_renderer.seek_to_progress(midi_teacher.get_progress())
@@ -114,6 +131,10 @@ midi_thread.start()
 
 running = True
 while running:
+    now_ms = pygame.time.get_ticks()
+    dt = max(0.0, (now_ms - last_time_ms) / 1000.0)
+    last_time_ms = now_ms
+
     for event in pygame.event.get():
         if event.type == pygame.QUIT or (
             event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
@@ -215,21 +236,30 @@ while running:
                     ls, le, _ = midi_teacher.get_loop_range()
                     print(f"Set loop start to {ls}")
                 elif event.button == 3:
-                    # right click: set loop end
+                    # right-click: set the loop end
                     midi_teacher.set_loop_end_index(idx)
                     ls, le, _ = midi_teacher.get_loop_range()
                     print(f"Set loop end to {le}")
 
                 pressed_notes_set.clear()
 
-    highlighted_notes = midi_teacher.get_next_notes() if teaching_mode else set()
     screen.fill(BG_COLOR)
-    draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, highlighted_notes)
-    if teaching_mode:
-        draw_ui_overlay(screen, midi_teacher, dims, font_small, font_medium)
-    else:
-        draw_progress_bar(screen, midi_teacher.get_progress(), dims)
-    sheet_music_renderer.draw(screen, dims.get('SHEET_Y', 0), midi_teacher.get_progress())
+
+    piano_y_target = piano_y_default if teaching_mode else piano_y_center
+    overlay_alpha_target = 1.0 if teaching_mode else 0.0
+    sheet_alpha_target = 1.0 if teaching_mode else 0.0
+    if dt > 0.0:
+        a = 1.0 - math.exp(-dt / max(1e-6, piano_tau))
+        piano_y_current += (piano_y_target - piano_y_current) * a
+        b = 1.0 - math.exp(-dt / max(1e-6, alpha_tau))
+        overlay_alpha_current += (overlay_alpha_target - overlay_alpha_current) * b
+        sheet_alpha_current += (sheet_alpha_target - sheet_alpha_current) * b
+    dims['PIANO_Y_OFFSET'] = piano_y_current
+    dims['PEDAL_Y'] = int(piano_y_current + WHITE_KEY_HEIGHT + 30)
+    draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, midi_teacher.get_next_notes() if teaching_mode else set())
+    draw_ui_overlay(screen, midi_teacher, dims, font_small, font_medium, alpha=overlay_alpha_current)
+    sheet_music_renderer.draw(screen, dims.get('SHEET_Y', 0), midi_teacher.get_progress(), alpha=sheet_alpha_current)
+
     pygame.display.flip()
     clock.tick(60)
 

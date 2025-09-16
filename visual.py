@@ -43,7 +43,7 @@ def draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, highlighte
     pedal_y = dims['PEDAL_Y']
     lowest_note = dims['LOWEST_NOTE']
     highest_note = dims['HIGHEST_NOTE']
-    piano_y_offset = dims['PIANO_Y_OFFSET']
+    piano_y_offset = int(dims.get('PIANO_Y_OFFSET', 0))
 
     bg_top = max(0, int(piano_y_offset) - 12)
     bg_height = int(white_key_height + pedal_height + 60)
@@ -104,7 +104,7 @@ def draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, highlighte
         pygame.draw.rect(screen, color, rect, border_radius=PEDAL_CORNER_RADIUS)
         pygame.draw.rect(screen, (0, 0, 0), rect, 2, border_radius=PEDAL_CORNER_RADIUS)
 
-def draw_progress_bar(screen, progress, dims):
+def draw_progress_bar(surface, progress, dims):
     screen_width = dims['SCREEN_WIDTH']
     bar_height = 28
     bar_margin = 24
@@ -116,28 +116,28 @@ def draw_progress_bar(screen, progress, dims):
     shadow_color = (0, 0, 0, 80)
     shadow_surface = pygame.Surface((bar_width, bar_height), pygame.SRCALPHA)
     pygame.draw.rect(shadow_surface, shadow_color, shadow_surface.get_rect(), border_radius=14)
-    screen.blit(shadow_surface, (x + shadow_offset, y + shadow_offset))
+    surface.blit(shadow_surface, (x + shadow_offset, y + shadow_offset))
 
     bg_color = (40, 40, 60, 180)
     bg_surface = pygame.Surface((bar_width, bar_height), pygame.SRCALPHA)
     pygame.draw.rect(bg_surface, bg_color, bg_surface.get_rect(), border_radius=14)
-    screen.blit(bg_surface, (x, y))
+    surface.blit(bg_surface, (x, y))
 
     fill_width = int(bar_width * progress)
     if fill_width > 0:
         fill_surface = pygame.Surface((fill_width, bar_height), pygame.SRCALPHA)
         pygame.draw.rect(fill_surface, (0, 200, 255), (0, 0, fill_width, bar_height), border_radius=14)
-        screen.blit(fill_surface, (x, y))
+        surface.blit(fill_surface, (x, y))
 
     font = pygame.font.SysFont("Segoe UI", 22, bold=True)
     percent = int(progress * 100)
     text = font.render(f"{percent}%", True, (255, 255, 255) if progress < 0.49 else (0, 0, 0))
     text_rect = text.get_rect(center=(screen_width // 2, y + bar_height // 2))
-    screen.blit(text, text_rect)
+    surface.blit(text, text_rect)
 
-def draw_ui_overlay(screen, midi_teacher, dims, font_small=None, font_medium=None):
+def draw_ui_overlay(screen, midi_teacher, dims, font_small=None, font_medium=None, alpha=1.0):
     """Draw the top UI overlay: progress bar, loop markers, status and instructions.
-    If fonts are not provided, create reasonable defaults.
+    Draw everything onto an overlay surface, apply the requested alpha, then blit to the screen.
     """
     # create fonts if not supplied
     if font_small is None:
@@ -157,8 +157,8 @@ def draw_ui_overlay(screen, midi_teacher, dims, font_small=None, font_medium=Non
     cur = midi_teacher.get_current_index()
     progress = midi_teacher.get_progress() if total > 0 else 0.0
 
-    # Draw progress bar (base)
-    draw_progress_bar(screen, progress, dims)
+    overlay = pygame.Surface((screen_width, screen_height), pygame.SRCALPHA)
+    draw_progress_bar(overlay, progress, dims)
 
     loop_start, loop_end, loop_enabled = midi_teacher.get_loop_range()
     if total > 0 and loop_enabled:
@@ -169,7 +169,7 @@ def draw_ui_overlay(screen, midi_teacher, dims, font_small=None, font_medium=Non
         pygame.draw.line(screen, color, (end_px, y), (end_px, y + bar_height), 3)
         shade = pygame.Surface((max(1, end_px - start_px), bar_height), pygame.SRCALPHA)
         shade.fill((*color, 40))
-        screen.blit(shade, (start_px, y))
+        overlay.blit(shade, (start_px, y))
 
     margin = 16
 
@@ -177,7 +177,7 @@ def draw_ui_overlay(screen, midi_teacher, dims, font_small=None, font_medium=Non
     txt = font_medium.render(status, True, (220, 220, 220))
     txt_w, txt_h = txt.get_size()
     status_y = max(margin, screen_height - margin - txt_h*4)
-    screen.blit(txt, (margin, status_y))
+    overlay.blit(txt, (margin, status_y))
 
     instr_lines = [
         "Click progress bar to seek.",
@@ -194,4 +194,7 @@ def draw_ui_overlay(screen, midi_teacher, dims, font_small=None, font_medium=Non
         iw, ih = it.get_size()
         px = screen_width - margin - iw
         py = instr_top + i * (line_h + padding_between)
-        screen.blit(it, (px, py))
+        overlay.blit(it, (px, py))
+    aa = max(0.0, min(1.0, float(alpha)))
+    overlay.set_alpha(int(aa * 255))
+    screen.blit(overlay, (0, 0))

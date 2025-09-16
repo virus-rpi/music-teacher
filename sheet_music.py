@@ -201,7 +201,7 @@ class SheetMusicRenderer:
         if self.debug:
             print(f"Built strip from SVG: width={self.full_width}px, detected {len(self.notehead_xs)} visual noteheads")
 
-    def draw(self, screen: pygame.Surface, y: int, progress: float) -> None:
+    def draw(self, screen: pygame.Surface, y: int, progress: float, alpha: float = 1.0) -> None:
         if self.full_surface is None:
             return
         view_w = self.screen_width
@@ -211,14 +211,16 @@ class SheetMusicRenderer:
 
         x_off = int(round(max(0.0, min(self._view_x_off, float(max(0, self.full_width - view_w))))))
         src_rect = pygame.Rect(x_off, 0, view_w, self.strip_height)
-        screen.blit(self.full_surface, (0, y), src_rect)
+
+        overlay = pygame.Surface((view_w, self.strip_height), pygame.SRCALPHA)
+        overlay.blit(self.full_surface, (0, 0), src_rect)
 
         screen_play_x = self._compute_screen_play_x(view_w, x_off, dt)
-
-        self._draw_overlay(screen, y, view_w, screen_play_x)
-        self._draw_debug_lines(screen, y, x_off, view_w)
-
-        pygame.draw.rect(screen, (20, 20, 20), (0, y, view_w, self.strip_height), 2)
+        self._draw_overlay(overlay, 0, view_w, screen_play_x)
+        self._draw_debug_lines(overlay, 0, x_off, view_w)
+        aa = max(0.0, min(1.0, float(alpha)))
+        overlay.set_alpha(int(aa * 255))
+        screen.blit(overlay, (0, y))
 
     def _compute_target_offset(self, view_w: int, progress: float) -> None:
         """Compute and set self._target_x_off based on the current note index or progress."""
