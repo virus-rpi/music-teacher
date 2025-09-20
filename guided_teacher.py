@@ -86,6 +86,8 @@ class PracticeSectionTask(Task):
                     self.teacher.synth.play_measure(self.measure, self.teacher.midi_teacher, self.teacher.midi_teacher.seek_to_index, self.teacher.midi_teacher.get_current_index())
                 elif event.key == pygame.K_SPACE:
                     self.teacher.synth.play_notes(self.section.chords, self.section.times, self.start_idx, self.teacher.midi_teacher.seek_to_index, self.teacher.midi_teacher.get_current_index())
+                elif event.key == pygame.K_RETURN and (event.mod & pygame.KMOD_SHIFT):
+                    self.teacher.previous_task()
                 elif event.key == pygame.K_RETURN:
                     self.teacher.next_task()
 
@@ -120,6 +122,8 @@ class PracticeTransitionTask(PracticeSectionTask):
                                                     self.teacher.midi_teacher.get_current_index())
                 elif event.key == pygame.K_SPACE:
                     self.teacher.synth.play_notes(self.section.chords, self.section.times, self.start_idx, self.teacher.midi_teacher.seek_to_index, self.teacher.midi_teacher.get_current_index())
+                elif event.key == pygame.K_RETURN and (event.mod & pygame.KMOD_SHIFT):
+                    self.teacher.previous_task()
                 elif event.key == pygame.K_RETURN:
                     self.teacher.next_task()
 
@@ -189,12 +193,22 @@ class GuidedTeacher:
     def next_task(self):
         if self.current_task:
             self.current_task.on_end()
+            if not isinstance(self.current_task, (GenerateNextMeasureTasks, PlaybackMeasureTask)):
+                self.history.append(self.current_task)
         if self.tasks:
             self.current_task = self.tasks.popleft()
             self.current_task.on_start()
         else:
             self.current_task = None
             self.stop()
+
+    def previous_task(self):
+        if self.history:
+            if self.current_task:
+                self.current_task.on_end()
+                self.tasks.insert(0, self.current_task)
+            self.current_task = self.history.pop()
+            self.current_task.on_start()
 
     def split_measure_into_sections(self, measure_index):
         measure_chords, measure_times, measure_xs, _, (measure_start_index, _) = self.midi_teacher.get_notes_for_measure(measure_index)
@@ -238,8 +252,6 @@ class GuidedTeacher:
             if end == n:
                 break
             i += max_chords - 1  # overlap 1
-
-        print(f"[Debug] Split measure {measure_index} into {len(sections)} sections.")
 
         return sections
 
