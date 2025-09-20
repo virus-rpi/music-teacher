@@ -102,7 +102,7 @@ class PracticeTransitionTask(PracticeSectionTask):
         from_chords, from_times, from_xs, _, (from_start_idx, _) = teacher.midi_teacher.get_notes_for_measure(from_measure)
         to_chords, to_times, to_xs, _, (to_start_idx, _) = teacher.midi_teacher.get_notes_for_measure(to_measure)
         section_chords = from_chords[-2:] + to_chords[:2]
-        section_times = from_times[-2:] + to_times[:2]
+        section_times = [0, from_times[-1] - from_times[-2]]  + [(from_times[-1] - from_times[-2])*2, to_times[1] + (from_times[-1] - from_times[-2])*2]
         section_xs = from_xs[-2:] + to_xs[:2]
         start_idx = from_start_idx + max(0, len(from_chords) - 2)
         end_idx = to_start_idx + min(1, len(to_chords) - 1) if to_chords else start_idx
