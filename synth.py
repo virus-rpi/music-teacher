@@ -46,6 +46,8 @@ class Synth:
             raise ValueError("Error: chords and times must have the same length")
         if start_index is not None and set_index_callback is None:
             raise ValueError("Error: set_index_callback must be provided if start_index is provided")
+        if reset_to_index is not None and set_index_callback is None:
+            raise ValueError("Error: set_index_callback must be provided if reset_to_index is provided")
 
         stop_event = threading.Event()
         def player():

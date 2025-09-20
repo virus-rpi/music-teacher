@@ -58,21 +58,17 @@ class PracticeSectionTask(Task):
         super().__init__(teacher)
         self.section = section
         self.measure = measure
-        self._section_progress = None
-        self._section_loop_info = None
+        measure_chords, _, _, _, (measure_start_index, _) = self.teacher.midi_teacher.get_notes_for_measure(self.measure)
+        self.start_idx = next(i for i in range(len(measure_chords)) if measure_chords[i] == self.section.chords[0]) + measure_start_index
+        self.end_idx = self.start_idx + len(self.section.chords) - 1
 
     def on_start(self):
         self.teacher.current_section_visual_info = self.section.xs
-        measure_chords, _, _, _, _ = self.teacher.midi_teacher.get_notes_for_measure(self.measure)
-        section_chords = self.section.chords
-        start_idx = next(i for i in range(len(measure_chords)) if measure_chords[i] == section_chords[0])
-        end_idx = start_idx + len(section_chords) - 1
         self.teacher.midi_teacher.loop_enabled = True
-        self.teacher.midi_teacher.loop_start = start_idx
-        self.teacher.midi_teacher.loop_end = end_idx
+        self.teacher.midi_teacher.loop_start = self.start_idx
+        self.teacher.midi_teacher.loop_end = self.end_idx
         self.teacher.current_section_visual_info = self.section.xs
-        self._section_progress = None
-        section_chords = self.section.chords
+        self.teacher.midi_teacher.seek_to_index(self.start_idx)
 
     def on_end(self):
         self.teacher.midi_teacher.loop_enabled = False
@@ -84,10 +80,10 @@ class PracticeSectionTask(Task):
     def _handle_pygame_events(self, pygame_events):
         for event in pygame_events:
             if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_SPACE:
-                    self.teacher.synth.play_measure(self.measure, self.teacher.midi_teacher)
-                elif event.key == pygame.K_r:
-                    self.teacher.synth.play_notes(self.section.chords, self.section.times)
+                if event.key == pygame.K_r:
+                    self.teacher.synth.play_measure(self.measure, self.teacher.midi_teacher, self.teacher.midi_teacher.seek_to_index, self.teacher.midi_teacher.get_current_index())
+                elif event.key == pygame.K_SPACE:
+                    self.teacher.synth.play_notes(self.section.chords, self.section.times, self.start_idx, self.teacher.midi_teacher.seek_to_index, self.teacher.midi_teacher.get_current_index())
                 elif event.key == pygame.K_RETURN:
                     self.teacher.next_task()
 
