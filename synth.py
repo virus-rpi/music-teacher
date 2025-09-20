@@ -35,7 +35,7 @@ class Synth:
     def play_measure(self, measure_index, midi_teacher, set_index_callback=None, reset_to_index=None):
         chords, times, _, _, (start_index, _) = midi_teacher.get_notes_for_measure(measure_index)
         
-        self.play_notes(chords, times, start_index=start_index, set_index_callback=set_index_callback, reset_to_index=reset_to_index)
+        self.play_notes(chords, times, start_index=start_index if set_index_callback else None, set_index_callback=set_index_callback, reset_to_index=reset_to_index)
 
     def play_notes(self, chords, times, start_index=None, set_index_callback=None, reset_to_index=None):
         """Play a sequence of chords with their corresponding times. The times are in milliseconds and say when a cord should be played relative to the first chord.
@@ -45,7 +45,7 @@ class Synth:
         if len(chords) != len(times):
             raise ValueError("Error: chords and times must have the same length")
         if start_index is not None and set_index_callback is None:
-            raise ValueError("Error: set_index_callback must be provided if notes_xs is provided")
+            raise ValueError("Error: set_index_callback must be provided if start_index is provided")
 
         stop_event = threading.Event()
         def player():

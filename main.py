@@ -153,9 +153,10 @@ midi_thread.start()
 
 running = True
 while running:
+    events = pygame.event.get()
     if guided_mode:
-        guided_teacher.update(pressed_notes_set, pressed_note_events)
-    for event in pygame.event.get():
+        guided_teacher.update(pressed_notes_set, pressed_note_events, events)
+    for event in events:
         if event.type == pygame.QUIT or (
             event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
             running = False
