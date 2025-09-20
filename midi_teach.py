@@ -154,30 +154,75 @@ class MidiTeacher:
         self._last_wrapped = False
         return w
 
+    def _get_measure_tick_boundaries(self):
+        """Returns a list of (start_tick, end_tick) for each measure in the MIDI file."""
+        mid = mido.MidiFile(self.midi_path)
+        ticks_per_beat = mid.ticks_per_beat
+        numerator = 4
+        denominator = 4
+        time_sig_changes = []
+        for track in mid.tracks:
+            abs_tick = 0
+            for msg in track:
+                abs_tick += msg.time
+                if msg.type == 'time_signature':
+                    time_sig_changes.append((abs_tick, msg.numerator, msg.denominator))
+        time_sig_changes.sort()
+        measure_boundaries = []
+        current_tick = 0
+        current_numerator = numerator
+        current_denominator = denominator
+        next_time_sig_idx = 0
+        last_tick = self.chord_times[-1] if self.chord_times else 0
+        while current_tick <= last_tick + ticks_per_beat:
+            if (next_time_sig_idx < len(time_sig_changes) and
+                current_tick >= time_sig_changes[next_time_sig_idx][0]):
+                _, current_numerator, current_denominator = time_sig_changes[next_time_sig_idx]
+                next_time_sig_idx += 1
+            beats_per_measure = current_numerator
+            beat_length = ticks_per_beat * 4 // current_denominator
+            measure_length = beats_per_measure * beat_length
+            start_tick = current_tick
+            end_tick = current_tick + measure_length
+            measure_boundaries.append((start_tick, end_tick))
+            current_tick = end_tick
+        return measure_boundaries
+
     def _set_measure_data(self):
         if not self.sheet_music_renderer:
             return
         measure_data = self.sheet_music_renderer.measure_data
         notehead_xs = self.sheet_music_renderer.notehead_xs
 
+        measure_tick_boundaries = self._get_measure_tick_boundaries()
         self.measures = []
-        current_chord_idx = 0
-
-        for measure_info in measure_data:
+        chord_times = self.chord_times
+        chords = self.chords
+        chord_idx = 0
+        for i, measure_info in enumerate(measure_data):
             if measure_info is None or len(measure_info) != 3:
-                self.measures.append(([], [], [], (None, None)))
+                self.measures.append(([], [], [], (None, None), (0, 0)))
                 continue
-            start_x, end_x, n_notes = measure_info
-            count = int(n_notes) if n_notes is not None else 0
-            if count == 0:
-                self.measures.append(([], [], [], (start_x, end_x)))
+            start_x, end_x, _ = measure_info
+            if i >= len(measure_tick_boundaries):
+                self.measures.append(([], [], [], (start_x, end_x), (chord_idx, chord_idx)))
                 continue
-            end_idx = min(current_chord_idx + count, len(self.chords))
-            measure_chords = self.chords[current_chord_idx:end_idx]
-            measure_chord_times = [measure_time - self.chord_times[current_chord_idx:end_idx][0] for measure_time in self.chord_times[current_chord_idx:end_idx]]
-            measure_note_xs = notehead_xs[current_chord_idx:end_idx] if notehead_xs else []
-            self.measures.append((measure_chords, measure_chord_times, measure_note_xs, (start_x, end_x), (current_chord_idx, end_idx)))
-            current_chord_idx = end_idx
+            start_tick, end_tick = measure_tick_boundaries[i]
+            # Find chords in this measure
+            measure_chord_indices = []
+            while chord_idx < len(chord_times) and chord_times[chord_idx] < end_tick:
+                if chord_times[chord_idx] >= start_tick:
+                    measure_chord_indices.append(chord_idx)
+                chord_idx += 1
+            measure_chords = [chords[j] for j in measure_chord_indices]
+            measure_chord_times = [chord_times[j] - start_tick for j in measure_chord_indices]
+            measure_note_xs = [notehead_xs[j] for j in measure_chord_indices] if notehead_xs else []
+            if measure_chord_indices:
+                start_index = measure_chord_indices[0]
+                end_index = measure_chord_indices[-1] + 1
+            else:
+                start_index = end_index = chord_idx
+            self.measures.append((measure_chords, measure_chord_times, measure_note_xs, (start_x, end_x), (start_index, end_index)))
 
     def get_notes_for_measure(self, measure_index) -> tuple[list, list, list, tuple[int, int], tuple[int, int]]:
         """Returns (chords, times, note_xs, (start_x, end_x), (start_index, end_index)) for the given measure index."""
