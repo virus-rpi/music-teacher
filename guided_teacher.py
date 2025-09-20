@@ -1,3 +1,4 @@
+import time
 from collections import deque
 from dataclasses import dataclass
 import pygame
@@ -12,6 +13,8 @@ class MeasureSection:
     chords: list
     times: list
     xs: list
+    start_idx: int
+    end_idx: int
 
 class Task(ABC):
     def __init__(self, teacher: 'GuidedTeacher'):
@@ -38,8 +41,8 @@ class PlaybackMeasureTask(Task):
         self.played = False
 
     def on_start(self):
-        _, _, self.notes_x, (start_x, end_x), _ = self.teacher.midi_teacher.get_notes_for_measure(self.measure)
-        self.teacher.current_section_visual_info = [start_x, end_x]
+        _, _, self.notes_x, _, _ = self.teacher.midi_teacher.get_notes_for_measure(self.measure)
+        self.teacher.current_section_visual_info = [self.notes_x[0], self.notes_x[-1]]
 
     def on_end(self):
         self.teacher.current_section_visual_info = None
@@ -58,9 +61,8 @@ class PracticeSectionTask(Task):
         super().__init__(teacher)
         self.section = section
         self.measure = measure
-        measure_chords, _, _, _, (measure_start_index, _) = self.teacher.midi_teacher.get_notes_for_measure(self.measure)
-        self.start_idx = next(i for i in range(len(measure_chords)) if measure_chords[i] == self.section.chords[0]) + measure_start_index
-        self.end_idx = self.start_idx + len(self.section.chords) - 1
+        self.start_idx = section.start_idx
+        self.end_idx = section.end_idx
 
     def on_start(self):
         self.teacher.current_section_visual_info = self.section.xs
@@ -89,16 +91,37 @@ class PracticeSectionTask(Task):
 
 class PracticeMeasureTask(PracticeSectionTask):
     def __init__(self, teacher: 'GuidedTeacher', measure):
-        chords, times, xs, _, _ = teacher.midi_teacher.get_notes_for_measure(measure)
-        super().__init__(teacher, MeasureSection(chords, times, xs), measure)
+        chords, times, xs, _, (measure_start_index, _) = teacher.midi_teacher.get_notes_for_measure(measure)
+        start_idx = measure_start_index
+        end_idx = start_idx + len(chords) - 1 if chords else start_idx
+        section = MeasureSection(chords, times, xs, start_idx, end_idx)
+        super().__init__(teacher, section, measure)
 
 class PracticeTransitionTask(PracticeSectionTask):
     def __init__(self, teacher, from_measure, to_measure):
-        from_chords, from_times, from_xs, _, _ = teacher.midi_teacher.get_notes_for_measure(from_measure)
-        to_chords, to_times, to_xs, _, _ = teacher.midi_teacher.get_notes_for_measure(to_measure)
-        section = MeasureSection(from_chords[-2:] + to_chords[:2], from_times[-2:] + to_times[:2],
-                                 from_xs[-2:] + to_xs[:2])
+        from_chords, from_times, from_xs, _, (from_start_idx, _) = teacher.midi_teacher.get_notes_for_measure(from_measure)
+        to_chords, to_times, to_xs, _, (to_start_idx, _) = teacher.midi_teacher.get_notes_for_measure(to_measure)
+        section_chords = from_chords[-2:] + to_chords[:2]
+        section_times = from_times[-2:] + to_times[:2]
+        section_xs = from_xs[-2:] + to_xs[:2]
+        start_idx = from_start_idx + max(0, len(from_chords) - 2)
+        end_idx = to_start_idx + min(1, len(to_chords) - 1) if to_chords else start_idx
+        section = MeasureSection(section_chords, section_times, section_xs, start_idx, end_idx)
         super().__init__(teacher, section, from_measure)
+
+    def _handle_pygame_events(self, pygame_events):
+        for event in pygame_events:
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_r:
+                    self.teacher.synth.play_measure(self.measure, self.teacher.midi_teacher, self.teacher.midi_teacher.seek_to_index, self.teacher.midi_teacher.get_current_index())
+                    time.sleep(.1)
+                    self.teacher.synth.play_measure(self.measure+1, self.teacher.midi_teacher,
+                                                    self.teacher.midi_teacher.seek_to_index,
+                                                    self.teacher.midi_teacher.get_current_index())
+                elif event.key == pygame.K_SPACE:
+                    self.teacher.synth.play_notes(self.section.chords, self.section.times, self.start_idx, self.teacher.midi_teacher.seek_to_index, self.teacher.midi_teacher.get_current_index())
+                elif event.key == pygame.K_RETURN:
+                    self.teacher.next_task()
 
 class GenerateNextMeasureTasks(Task):
     def on_start(self):
@@ -174,7 +197,7 @@ class GuidedTeacher:
             self.stop()
 
     def split_measure_into_sections(self, measure_index):
-        measure_chords, measure_times, measure_xs, _, _ = self.midi_teacher.get_notes_for_measure(measure_index)
+        measure_chords, measure_times, measure_xs, _, (measure_start_index, _) = self.midi_teacher.get_notes_for_measure(measure_index)
         if not measure_chords:
             return []
 
@@ -185,7 +208,9 @@ class GuidedTeacher:
             section_chords = measure_chords[i:i + notes_per_section]
             section_times = measure_times[i:i + notes_per_section]
             section_xs = measure_xs[i:i + notes_per_section]
-            sections.append(MeasureSection(section_chords, section_times, section_xs))
+            start_index = measure_start_index + i
+            end_index = start_index + len(section_chords) - 1
+            sections.append(MeasureSection(section_chords, section_times, section_xs, start_index, end_index))
 
         print(f"[Debug] Split measure {measure_index} into {len(sections)} sections.")
 
