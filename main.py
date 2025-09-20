@@ -72,14 +72,42 @@ dims = {
     'SHEET_Y': SHEET_Y
 }
 
-synth = Synth(SOUNDFONT_PATH)
-midi_teacher = MidiTeacher(MIDI_TEACH_PATH)
-sheet_music_renderer = SheetMusicRenderer(MIDI_TEACH_PATH, SCREEN_WIDTH)
-midi_teacher.set_measure_data(sheet_music_renderer.measure_data, sheet_music_renderer.notehead_xs)
-guided_teacher = GuidedTeacher(midi_teacher, synth)
-
 font_small = pygame.font.SysFont("Segoe UI", 16)
 font_medium = pygame.font.SysFont("Segoe UI", 20, bold=True)
+
+def render():
+    global last_time_ms, piano_y_current, piano_y_target, overlay_alpha_current, overlay_alpha_target, sheet_alpha_current, sheet_alpha_target
+    now_ms = pygame.time.get_ticks()
+    dt = max(0.0, (now_ms - last_time_ms) / 1000.0)
+    last_time_ms = now_ms
+
+    screen.fill(BG_COLOR)
+
+    piano_y_target = piano_y_default if teaching_mode else piano_y_center
+    overlay_alpha_target = 1.0 if teaching_mode else 0.0
+    sheet_alpha_target = 1.0 if teaching_mode else 0.0
+    if dt > 0.0:
+        a = 1.0 - math.exp(-dt / max(1e-6, piano_tau))
+        piano_y_current += (piano_y_target - piano_y_current) * a
+        b = 1.0 - math.exp(-dt / max(1e-6, alpha_tau))
+        overlay_alpha_current += (overlay_alpha_target - overlay_alpha_current) * b
+        sheet_alpha_current += (sheet_alpha_target - sheet_alpha_current) * b
+    dims['PIANO_Y_OFFSET'] = piano_y_current
+    dims['PEDAL_Y'] = int(piano_y_current + WHITE_KEY_HEIGHT + 30)
+    draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims,
+               midi_teacher.get_next_notes() if teaching_mode else set())
+    draw_ui_overlay(screen, midi_teacher, dims, font_small, font_medium, alpha=overlay_alpha_current)
+    if guided_mode:
+        draw_guided_mode_overlay(screen, guided_teacher, sheet_music_renderer, dims)
+    sheet_music_renderer.draw(screen, dims.get('SHEET_Y', 0), midi_teacher.get_progress(), alpha=sheet_alpha_current)
+
+    pygame.display.flip()
+
+
+synth = Synth(SOUNDFONT_PATH, render)
+sheet_music_renderer = SheetMusicRenderer(MIDI_TEACH_PATH, SCREEN_WIDTH)
+midi_teacher = MidiTeacher(MIDI_TEACH_PATH, sheet_music_renderer)
+guided_teacher = GuidedTeacher(midi_teacher, synth)
 
 def midi_listener():
     try:
@@ -125,10 +153,6 @@ midi_thread.start()
 
 running = True
 while running:
-    now_ms = pygame.time.get_ticks()
-    dt = max(0.0, (now_ms - last_time_ms) / 1000.0)
-    last_time_ms = now_ms
-
     if guided_mode:
         guided_teacher.update(pressed_notes_set, pressed_note_events)
     for event in pygame.event.get():
@@ -226,28 +250,7 @@ while running:
 
                 pressed_notes_set.clear()
 
-    sheet_music_renderer.seek_to_index(midi_teacher.get_current_index())
-
-    screen.fill(BG_COLOR)
-
-    piano_y_target = piano_y_default if teaching_mode else piano_y_center
-    overlay_alpha_target = 1.0 if teaching_mode else 0.0
-    sheet_alpha_target = 1.0 if teaching_mode else 0.0
-    if dt > 0.0:
-        a = 1.0 - math.exp(-dt / max(1e-6, piano_tau))
-        piano_y_current += (piano_y_target - piano_y_current) * a
-        b = 1.0 - math.exp(-dt / max(1e-6, alpha_tau))
-        overlay_alpha_current += (overlay_alpha_target - overlay_alpha_current) * b
-        sheet_alpha_current += (sheet_alpha_target - sheet_alpha_current) * b
-    dims['PIANO_Y_OFFSET'] = piano_y_current
-    dims['PEDAL_Y'] = int(piano_y_current + WHITE_KEY_HEIGHT + 30)
-    draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims, midi_teacher.get_next_notes() if teaching_mode else set())
-    draw_ui_overlay(screen, midi_teacher, dims, font_small, font_medium, alpha=overlay_alpha_current)
-    if guided_mode:
-        draw_guided_mode_overlay(screen, guided_teacher, sheet_music_renderer, dims)
-    sheet_music_renderer.draw(screen, dims.get('SHEET_Y', 0), midi_teacher.get_progress(), alpha=sheet_alpha_current)
-
-    pygame.display.flip()
+    render()
     clock.tick(60)
 
 pygame.quit()

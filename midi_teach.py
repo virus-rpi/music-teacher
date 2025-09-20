@@ -1,16 +1,20 @@
 import mido
+from sheet_music import SheetMusicRenderer
+
 
 class MidiTeacher:
-    def __init__(self, midi_path):
+    def __init__(self, midi_path, sheet_music_renderer: SheetMusicRenderer):
         self.midi_path = midi_path
+        self.sheet_music_renderer = sheet_music_renderer
         self.chords, self.chord_times = self._extract_chords()
-        self.current_index = 0
+        self._current_index = 0
         self._pending_notes = set()
         self.loop_enabled = False
         self.loop_start = 0
         self.loop_end = max(0, len(self.chords) - 1)
         self._last_wrapped = False
         self.measures = []
+        self._set_measure_data()
 
     def _extract_chords(self):
         mid = mido.MidiFile(self.midi_path)
@@ -48,13 +52,6 @@ class MidiTeacher:
             return {note: hand for note, hand in self.chords[self.current_index]}
         return {}
 
-    def advance_if_pressed(self, pressed_notes):
-        self._last_wrapped = False
-        next_notes = self.get_next_notes()
-        if next_notes and set(next_notes.keys()).issubset(pressed_notes):
-            return self.advance_one()
-        return False
-
     def reset(self):
         self.current_index = 0
         self._pending_notes = set()
@@ -80,15 +77,29 @@ class MidiTeacher:
             self.current_index = min(candidate, len(self.chords) - 1)
         return True
 
+    @property
+    def current_index(self):
+        return self._current_index
+
+    @current_index.setter
+    def current_index(self, value):
+        if not self.chords:
+            self._current_index = 0
+        else:
+            self._current_index = max(0, min(int(value), len(self.chords) - 1))
+        if self.sheet_music_renderer is not None:
+            self.sheet_music_renderer.seek_to_index(self._current_index)
+        print("Current index set to", self._current_index)
+
     def seek_to_index(self, index: int):
         if not self.chords:
             self.current_index = 0
             return
-        self.current_index = max(0, min(int(index), len(self.chords) - 1))
+        self.current_index = index
         self._last_wrapped = False
 
     def seek_relative(self, delta: int):
-        self.seek_to_index(self.current_index + int(delta))
+        self.current_index = self.current_index + int(delta)
 
     def seek_to_progress(self, progress: float):
         if not self.chords:
@@ -147,22 +158,11 @@ class MidiTeacher:
     def get_chord_times(self):
         return list(self.chord_times)
 
-    def get_chords_segment(self, start_idx: int, count: int):
-        if not self.chords:
-            return [], []
-        start = max(0, min(int(start_idx), len(self.chords) - 1))
-        end = max(start, min(start + int(count), len(self.chords)))
-        return self.chords[start:end], self.chord_times[start:end]
-
-    def get_remaining_chords_count(self, start_idx: int):
-        if not self.chords:
-            return 0
-        return max(0, len(self.chords) - max(0, int(start_idx)))
-
-    def set_measure_data(self, measure_data, notehead_xs):
-        print(f"[Debug] set_measure_data called. len(measure_data): {len(measure_data)}, len(self.chords): {len(self.chords)}")
-        if not measure_data or not self.chords:
+    def _set_measure_data(self):
+        if not self.sheet_music_renderer:
             return
+        measure_data = self.sheet_music_renderer.measure_data
+        notehead_xs = self.sheet_music_renderer.notehead_xs
 
         self.measures = []
         current_chord_idx = 0
@@ -180,16 +180,11 @@ class MidiTeacher:
             measure_chords = self.chords[current_chord_idx:end_idx]
             measure_chord_times = [measure_time - self.chord_times[current_chord_idx:end_idx][0] for measure_time in self.chord_times[current_chord_idx:end_idx]]
             measure_note_xs = notehead_xs[current_chord_idx:end_idx] if notehead_xs else []
-            self.measures.append((measure_chords, measure_chord_times, measure_note_xs, (start_x, end_x)))
+            self.measures.append((measure_chords, measure_chord_times, measure_note_xs, (start_x, end_x), (current_chord_idx, end_idx)))
             current_chord_idx = end_idx
 
     def get_notes_for_measure(self, measure_index) -> tuple[list, list, list, tuple[int, int]]:
-        """Returns (chords, times, note_xs, (start_x, end_x)) for the given measure index."""
+        """Returns (chords, times, note_xs, (start_x, end_x), (start_index, end_index)) for the given measure index."""
         if 0 <= measure_index < len(self.measures):
             return self.measures[measure_index]
-        return [], [], [], (0, 0)
-
-    def get_visual_info_for_measure(self, measure_index):
-        if 0 <= measure_index < len(self.measures):
-            return self.measures[measure_index][2]
-        return []
+        return [], [], [], (0, 0), (0, 0)
