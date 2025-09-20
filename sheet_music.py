@@ -342,7 +342,7 @@ class SheetMusicRenderer:
         pygame.draw.rect(overlay, rect_color, (0, 0, cur_rect[2], cur_rect[3]), border_radius=10)
         overlay.blit(
             pygame.Surface((current_note_highlight[2], current_note_highlight[3]), pygame.SRCALPHA) if current_note_highlight else pygame.Surface((0, 0), pygame.SRCALPHA),
-            (current_note_highlight[0]-cur_rect[0], 0) if current_note_highlight else (0, 0),
+            (current_note_highlight[0]-cur_rect[0]+x_off, 0) if current_note_highlight else (0, 0),
             None,
             pygame.BLEND_RGBA_MULT
         )
