@@ -3,6 +3,14 @@ import mido
 from typing import Optional
 from midi_teach import MidiTeacher
 
+WEIGHTS = {
+    'accuracy': 0.6,
+    'relative': 0.25,
+    'absolute': 0.15,
+}
+
+assert WEIGHTS['accuracy'] + WEIGHTS['relative'] + WEIGHTS['absolute'] == 1.0, "Weights must sum to 1.0"
+
 
 @dataclass
 class Score:
@@ -153,7 +161,7 @@ class Evaluator:
             rel_error = abs(rec_total - ref_total) / float(ref_total)
             absolute_score = max(0.0, 1.0 - min(rel_error, 1.0))
 
-        score = (0.7 * accuracy_score) + (0.2 * relative_score) + (0.1 * absolute_score)
+        score = (WEIGHTS['accuracy'] * accuracy_score) + (WEIGHTS['relative'] * relative_score) + (WEIGHTS['absolute'] * absolute_score)
         score = max(0.0, min(1.0, score))
 
         # collect analytics to help generate guidance
@@ -210,9 +218,10 @@ class Evaluator:
         if not self.analytics:
             return "No guidance available."
 
-        acc_impact = 0.7 * (1.0 - self.analytics.get('accuracy', 1.0))
-        rel_impact = 0.2 * (1.0 - self.analytics.get('relative', 1.0))
-        abs_impact = 0.1 * (1.0 - self.analytics.get('absolute', 1.0))
+        # compute component impacts (how much they reduced the overall score)
+        acc_impact = WEIGHTS['accuracy'] * (1.0 - self.analytics.get('accuracy', 1.0))
+        rel_impact = WEIGHTS['relative'] * (1.0 - self.analytics.get('relative', 1.0))
+        abs_impact = WEIGHTS['absolute'] * (1.0 - self.analytics.get('absolute', 1.0))
 
         impacts = [('accuracy', acc_impact), ('relative', rel_impact), ('absolute', abs_impact)]
         impacts.sort(key=lambda x: x[1], reverse=True)

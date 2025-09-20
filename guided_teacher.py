@@ -1,10 +1,8 @@
 import time
 from collections import deque
 from dataclasses import dataclass
-
 import mido
 import pygame
-
 from evaluator import Evaluator
 from midi_teach import MidiTeacher
 from synth import Synth
@@ -149,7 +147,7 @@ class PracticeSectionTask(Task):
 
         self.teacher.last_score = score.overall
         print(f"Eval: accuracy={score.accuracy:.3f} rel={score.relative_timing:.3f} abs={score.absolute_timing:.3f} -> score={score.overall:.3f}")
-        if score.overall > 0.9 and self.teacher.auto_advance:
+        if score.overall > 0.95 and self.teacher.auto_advance:
             self.teacher.next_task()
             self.teacher.guide_text = None
         else:
