@@ -89,7 +89,6 @@ class MidiTeacher:
             self._current_index = max(0, min(int(value), len(self.chords) - 1))
         if self.sheet_music_renderer is not None:
             self.sheet_music_renderer.seek_to_index(self._current_index)
-        print("Current index set to", self._current_index)
 
     def seek_to_index(self, index: int):
         if not self.chords:

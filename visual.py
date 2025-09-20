@@ -202,45 +202,6 @@ def draw_ui_overlay(screen, midi_teacher, dims, font_small=None, font_medium=Non
 def draw_guided_mode_overlay(screen, guided_teacher, sheet_music_renderer, dims):
     if not guided_teacher.is_active or not guided_teacher.current_section_visual_info:
         return
-    padding = 12
-    animation_duration = 150  # ms
-    rect_color = (0, 255, 0, 64)
-
-    start_x = guided_teacher.current_section_visual_info[0] - sheet_music_renderer.view_x_off
-    rect_x = start_x - padding
-    rect_y = dims['SHEET_Y']
-    rect_w = guided_teacher.current_section_visual_info[-1] - sheet_music_renderer.view_x_off - start_x + padding*2
-    rect_h = sheet_music_renderer.strip_height
-
-    now = pygame.time.get_ticks()
-    target = (rect_x, rect_y, rect_w, rect_h)
-    if not hasattr(draw_guided_mode_overlay, "anim_state"):
-        draw_guided_mode_overlay.anim_state = {
-            'prev': target,
-            'target': target,
-            'start_time': now,
-            'animating': False
-        }
-    state = draw_guided_mode_overlay.anim_state
-    if state['target'] != target:
-        state['prev'] = state['prev'] if state['animating'] else state['target']
-        state['target'] = target
-        state['start_time'] = now
-        state['animating'] = True
-    if state['animating']:
-        elapsed = now - state['start_time']
-        t = min(1.0, elapsed / animation_duration)
-        interp = lambda a, b: a + (b - a) * t
-        cur_rect = tuple(int(interp(p, q)) for p, q in zip(state['prev'], state['target']))
-        if t >= 1.0:
-            state['animating'] = False
-            state['prev'] = state['target']
-    else:
-        cur_rect = state['target']
-    overlay = pygame.Surface((cur_rect[2], cur_rect[3]), pygame.SRCALPHA)
-    pygame.draw.rect(overlay, rect_color, (0, 0, cur_rect[2], cur_rect[3]), border_radius=10)
-    screen.blit(overlay, (cur_rect[0], cur_rect[1]))
-
     score = guided_teacher.get_last_score()
     if score is not None:
         font = pygame.font.SysFont("Segoe UI", 24, bold=True)

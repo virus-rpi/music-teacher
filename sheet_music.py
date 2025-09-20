@@ -279,7 +279,7 @@ class SheetMusicRenderer:
         if self.debug:
             print(f"Built strip from SVG: width={self.full_width}px, detected {len(self.notehead_xs)} visual noteheads")
 
-    def draw(self, screen: pygame.Surface, y: int, progress: float, alpha: float = 1.0) -> None:
+    def draw(self, screen: pygame.Surface, y: int, progress: float, guided_teacher, alpha: float = 1.0) -> None:
         if self.full_surface is None:
             return
         view_w = self.screen_width
@@ -293,12 +293,55 @@ class SheetMusicRenderer:
         overlay = pygame.Surface((view_w, self.strip_height), pygame.SRCALPHA)
         overlay.blit(self.full_surface, (0, 0), src_rect)
 
+        if guided_teacher is not None:
+            self._draw_guided_overlay_rect(overlay, guided_teacher, x_off)
+
         screen_play_x = self._compute_screen_play_x(view_w, x_off, dt)
         self._draw_overlay(overlay, 0, view_w, screen_play_x)
         self._draw_debug_lines(overlay, 0, x_off, view_w)
         aa = max(0.0, min(1.0, float(alpha)))
         overlay.set_alpha(int(aa * 255))
         screen.blit(overlay, (0, y))
+
+    def _draw_guided_overlay_rect(self, screen, guided_teacher, x_off):
+        if not guided_teacher.is_active or not guided_teacher.current_section_visual_info:
+            return
+        padding = 12
+        animation_duration = 150  # ms
+        rect_color = (0, 255, 0, 64)
+
+        start_x = guided_teacher.current_section_visual_info[0]
+        rect_x = start_x - padding
+        rect_w = guided_teacher.current_section_visual_info[-1] - start_x + padding*2
+
+        now = pygame.time.get_ticks()
+        target = (rect_x, 0, rect_w, self.strip_height)
+        if not hasattr(self, "_guided_anim_state"):
+            self._guided_anim_state = {
+                'prev': target,
+                'target': target,
+                'start_time': now,
+                'animating': False
+            }
+        state = self._guided_anim_state
+        if state['target'] != target:
+            state['prev'] = state['prev'] if state['animating'] else state['target']
+            state['target'] = target
+            state['start_time'] = now
+            state['animating'] = True
+        if state['animating']:
+            elapsed = now - state['start_time']
+            t = min(1.0, elapsed / animation_duration)
+            interp = lambda a, b: a + (b - a) * t
+            cur_rect = tuple(int(interp(p, q)) for p, q in zip(state['prev'], state['target']))
+            if t >= 1.0:
+                state['animating'] = False
+                state['prev'] = state['target']
+        else:
+            cur_rect = state['target']
+        overlay = pygame.Surface((cur_rect[2], cur_rect[3]), pygame.SRCALPHA)
+        pygame.draw.rect(overlay, rect_color, (0, 0, cur_rect[2], cur_rect[3]), border_radius=10)
+        screen.blit(overlay, (cur_rect[0]-x_off, cur_rect[1]))
 
     def _compute_target_offset(self, view_w: int, progress: float) -> None:
         """Compute and set self._target_x_off based on the current note index or progress."""

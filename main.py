@@ -99,7 +99,7 @@ def render():
     draw_ui_overlay(screen, midi_teacher, dims, font_small, font_medium, alpha=overlay_alpha_current)
     if guided_mode:
         draw_guided_mode_overlay(screen, guided_teacher, sheet_music_renderer, dims)
-    sheet_music_renderer.draw(screen, dims.get('SHEET_Y', 0), midi_teacher.get_progress(), alpha=sheet_alpha_current)
+    sheet_music_renderer.draw(screen, dims.get('SHEET_Y', 0), midi_teacher.get_progress(), guided_teacher, sheet_alpha_current)
 
     pygame.display.flip()
 
