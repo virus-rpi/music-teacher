@@ -182,7 +182,7 @@ class MidiTeacher:
             self.measures.append((measure_chords, measure_chord_times, measure_note_xs, (start_x, end_x), (current_chord_idx, end_idx)))
             current_chord_idx = end_idx
 
-    def get_notes_for_measure(self, measure_index) -> tuple[list, list, list, tuple[int, int]]:
+    def get_notes_for_measure(self, measure_index) -> tuple[list, list, list, tuple[int, int], tuple[int, int]]:
         """Returns (chords, times, note_xs, (start_x, end_x), (start_index, end_index)) for the given measure index."""
         if 0 <= measure_index < len(self.measures):
             return self.measures[measure_index]
