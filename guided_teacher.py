@@ -25,16 +25,24 @@ class PlaybackMeasureTask(Task):
     def __init__(self, teacher, measure):
         super().__init__(teacher)
         self.measure = measure
+        self.not_played_for = 0
+        self.played = False
 
     def on_start(self):
-        self.teacher.synth.play_measure(self.measure, self.teacher.midi_teacher)
-        self.teacher.next_task()
+        _, _, _, (start_x, end_x) = self.teacher.midi_teacher.get_notes_for_measure(self.measure)
+        self.teacher.current_section_visual_info = [start_x, end_x]
 
     def on_end(self):
-        pass
+        self.teacher.current_section_visual_info = None
 
     def on_tick(self, pressed_notes, pressed_note_events):
-        pass
+        if self.not_played_for > 10 and not self.played: # give it a bit of time to render highlight
+            self.teacher.synth.play_measure(self.measure, self.teacher.midi_teacher)
+            self.played = True
+        elif self.played:
+            self.teacher.next_task()
+        else:
+            self.not_played_for += 1
 
 class PracticeSectionTask(Task):
     def __init__(self, teacher, section, measure):
@@ -129,45 +137,34 @@ class PracticeSectionTask(Task):
             else:
                 self._section_progress = {}
 
-class PracticeMeasureTask(Task):
+class PracticeMeasureTask(PracticeSectionTask):
     def __init__(self, teacher, measure):
-        super().__init__(teacher)
-        self.measure = measure
+        cords, times, note_xs, _ = teacher.midi_teacher.get_notes_for_measure(measure)
+        super().__init__(teacher, (cords, times, note_xs), measure)
 
     def on_start(self):
-        pass
+        super().on_start()
 
     def on_end(self):
-        pass
+        super().on_end()
 
     def on_tick(self, pressed_notes, pressed_note_events):
-        teacher = self.teacher
-        measure_chords, measure_times, _, _ = teacher.midi_teacher.get_notes_for_measure(self.measure)
-        teacher.last_score = evaluate_performance(measure_chords, measure_times, pressed_notes, pressed_note_events)
-        if teacher.last_score >= 0.8:
-            teacher.history.append(self)
-            teacher.next_task()
+        super().on_tick(pressed_notes, pressed_note_events)
 
-class PracticeTransitionTask(Task):
+class PracticeTransitionTask(PracticeSectionTask):
     def __init__(self, teacher, from_measure, to_measure):
-        super().__init__(teacher)
-        self.from_measure = from_measure
-        self.to_measure = to_measure
+        from_chords, from_times, from_xs, _ = teacher.midi_teacher.get_notes_for_measure(from_measure)
+        to_chords, to_times, to_xs, _ = teacher.midi_teacher.get_notes_for_measure(to_measure)
+        super().__init__(teacher, (from_chords[-2:] + to_chords[:2], from_times[-2:] + to_times[:2], from_xs[-2:] + to_xs[:2]), from_measure)
 
     def on_start(self):
-        pass
+        super().on_start()
 
     def on_end(self):
-        pass
+        super().on_end()
 
     def on_tick(self, pressed_notes, pressed_note_events):
-        teacher = self.teacher
-        transition_chords, transition_times, _ = teacher.get_transition_notes(self.from_measure, self.to_measure)
-        teacher.last_score = evaluate_performance(transition_chords, transition_times, pressed_notes, pressed_note_events)
-        if teacher.last_score >= 0.8:
-            teacher.history.append(self)
-            teacher.current_measure_index += 1
-            teacher.generate_tasks_for_measure(teacher.current_measure_index)
+        super().on_tick(pressed_notes, pressed_note_events)
 
 class GuidedTeacher:
     def __init__(self, midi_teacher: MidiTeacher, synth: Synth):
@@ -215,7 +212,8 @@ class GuidedTeacher:
         for section in self.measure_sections:
             self.tasks.append(PracticeSectionTask(self, section, measure_index))
         self.tasks.append(PracticeMeasureTask(self, measure_index))
-        self.tasks.append(PracticeTransitionTask(self, measure_index, measure_index + 1))
+        if measure_index + 1 < len(self.midi_teacher.measures):
+            self.tasks.append(PracticeTransitionTask(self, measure_index, measure_index + 1))
 
     def next_task(self):
         if self.current_task:
@@ -244,13 +242,6 @@ class GuidedTeacher:
         print(f"[Debug] Split measure {measure_index} into {len(sections)} sections.")
 
         return sections
-
-    def get_transition_notes(self, from_measure, to_measure):
-        from_chords, from_times, from_xs = self.midi_teacher.get_notes_for_measure(from_measure)
-        to_chords, to_times, to_xs = self.midi_teacher.get_notes_for_measure(to_measure)
-        if not from_chords or not to_chords:
-            return [], [], []
-        return from_chords[-2:] + to_chords[:2], from_times[-2:] + to_times[:2], from_xs[-2:] + to_xs[:2]
 
     def repeat_measure(self):
         if self.current_task and hasattr(self.current_task, 'measure'):

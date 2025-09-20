@@ -202,12 +202,13 @@ def draw_ui_overlay(screen, midi_teacher, dims, font_small=None, font_medium=Non
 def draw_guided_mode_overlay(screen, guided_teacher, sheet_music_renderer, dims):
     if not guided_teacher.is_active or not guided_teacher.current_section_visual_info:
         return
+    padding = 20
 
     start_x = guided_teacher.current_section_visual_info[0] - sheet_music_renderer.view_x_off
 
-    rect_x = start_x - 10 # padding
+    rect_x = start_x - padding
     rect_y = dims['SHEET_Y']
-    rect_w = guided_teacher.current_section_visual_info[-1] - sheet_music_renderer.view_x_off - start_x + 20  # padding
+    rect_w = guided_teacher.current_section_visual_info[-1] - sheet_music_renderer.view_x_off - start_x + padding*2
     rect_h = sheet_music_renderer.strip_height
 
     overlay = pygame.Surface((rect_w, rect_h), pygame.SRCALPHA)
