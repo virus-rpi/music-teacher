@@ -200,12 +200,18 @@ def draw_ui_overlay(screen, midi_teacher, dims, font_small=None, font_medium=Non
     screen.blit(overlay, (0, 0))
 
 def draw_guided_mode_overlay(screen, guided_teacher, sheet_music_renderer, dims):
-    if not guided_teacher.is_active or not guided_teacher.current_section_visual_info:
+    if not guided_teacher.is_active:
         return
     score = guided_teacher.get_last_score()
     if score is not None:
         font = pygame.font.SysFont("Segoe UI", 24, bold=True)
-        score_text = f"Score: {score:.2f}"
+        score_text = f"Score: {score*100:.0f}%"
         text = font.render(score_text, True, (255, 255, 255))
         text_rect = text.get_rect(center=(dims['SCREEN_WIDTH'] // 2, dims['SHEET_Y'] + sheet_music_renderer.strip_height + 30))
+        screen.blit(text, text_rect)
+    guide_text = guided_teacher.get_guide_text()
+    if guide_text:
+        font = pygame.font.SysFont("Segoe UI", 16)
+        text = font.render(guide_text, True, (255, 255, 255))
+        text_rect = text.get_rect(center=(dims['SCREEN_WIDTH'] // 2, dims['SHEET_Y'] + sheet_music_renderer.strip_height + 60))
         screen.blit(text, text_rect)
