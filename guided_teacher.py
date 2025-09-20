@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import mido
 import pygame
 
-from evaluator import evaluate
+from evaluator import Evaluator
 from midi_teach import MidiTeacher
 from synth import Synth
 from abc import ABC, abstractmethod
@@ -105,10 +105,6 @@ class PracticeSectionTask(Task):
                     self.teacher.synth.play_measure(self.measure, self.teacher.midi_teacher, self.teacher.midi_teacher.seek_to_index, self.teacher.midi_teacher.get_current_index())
                 elif event.key == pygame.K_SPACE:
                     self.teacher.synth.play_notes(self.section.chords, self.section.times, self.start_idx, self.teacher.midi_teacher.seek_to_index, self.teacher.midi_teacher.get_current_index())
-                elif event.key == pygame.K_RETURN and (event.mod & pygame.KMOD_SHIFT):
-                    self.teacher.previous_task()
-                elif event.key == pygame.K_RETURN:
-                    self.teacher.next_task()
 
     def _handle_midi_events(self, pressed_notes: set[int], pressed_note_events):
         if len(self.recording) == 0 and len(pressed_note_events) > 0:
@@ -148,12 +144,16 @@ class PracticeSectionTask(Task):
         self._prev_pressed_notes = current
 
     def _handle_evaluate(self):
-        score = evaluate(self, self.recording, self.teacher.midi_teacher)
+        evaluator = Evaluator(self)
+        score = evaluator.score
 
         self.teacher.last_score = score.overall
         print(f"Eval: accuracy={score.accuracy:.3f} rel={score.relative_timing:.3f} abs={score.absolute_timing:.3f} -> score={score.overall:.3f}")
-        if score.overall > 0.9:
+        if score.overall > 0.9 and self.teacher.auto_advance:
             self.teacher.next_task()
+            self.teacher.guide_text = None
+        else:
+            self.teacher.guide_text = evaluator.generate_guidance(score)
 
 class PracticeMeasureTask(PracticeSectionTask):
     def __init__(self, teacher: 'GuidedTeacher', measure):
@@ -186,10 +186,6 @@ class PracticeTransitionTask(PracticeSectionTask):
                                                     self.teacher.midi_teacher.get_current_index())
                 elif event.key == pygame.K_SPACE:
                     self.teacher.synth.play_notes(self.section.chords, self.section.times, self.start_idx, self.teacher.midi_teacher.seek_to_index, self.teacher.midi_teacher.get_current_index())
-                elif event.key == pygame.K_RETURN and (event.mod & pygame.KMOD_SHIFT):
-                    self.teacher.previous_task()
-                elif event.key == pygame.K_RETURN:
-                    self.teacher.next_task()
 
 class GenerateNextMeasureTasks(Task):
     def on_start(self):
@@ -210,6 +206,7 @@ class GuidedTeacher:
         self.midi_teacher = midi_teacher
         self.synth = synth
         self.is_active = False
+        self.auto_advance = True
         self.tasks = deque()
         self.history = []
         self.current_task = None
@@ -245,6 +242,16 @@ class GuidedTeacher:
         if not self.current_task and self.tasks:
             self.next_task()
         self.current_task.on_tick(pressed_notes, pressed_note_events, pygame_events)
+
+        for event in pygame_events:
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_RETURN and (event.mod & pygame.KMOD_SHIFT):
+                    self.previous_task()
+                elif event.key == pygame.K_RETURN:
+                    self.next_task()
+                elif event.key == pygame.K_a:
+                    self.auto_advance = not self.auto_advance
+                    print(f"Auto advance: {self.auto_advance}")
 
     def generate_tasks_for_measure(self, measure_index):
         self.tasks.clear()
