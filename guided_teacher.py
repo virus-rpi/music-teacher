@@ -6,7 +6,7 @@ from midi_teach import MidiTeacher
 from synth import Synth
 from abc import ABC, abstractmethod
 
-NOTES_PER_SECTION = 4
+CHORDS_PER_SECTION = (3, 4)
 
 @dataclass(frozen=True)
 class MeasureSection:
@@ -201,16 +201,43 @@ class GuidedTeacher:
         if not measure_chords:
             return []
 
+        min_chords, max_chords = CHORDS_PER_SECTION
+        n = len(measure_chords)
         sections = []
-        notes_per_section = min(NOTES_PER_SECTION, len(measure_chords))
-
-        for i in range(0, len(measure_chords) - notes_per_section + 1, notes_per_section - 1):
-            section_chords = measure_chords[i:i + notes_per_section]
-            section_times = measure_times[i:i + notes_per_section]
-            section_xs = measure_xs[i:i + notes_per_section]
+        i = 0
+        while i < n:
+            end = min(i + max_chords, n)
+            next_i = i + max_chords - 1  # overlap 1
+            next_remaining = n - next_i
+            if next_remaining < min_chords and (i + max_chords - 2 >= 0):
+                penult_len = n - (i + max_chords - 2)
+                curr_len = end - i
+                if penult_len >= min_chords and curr_len > min_chords:
+                    end = min(i + max_chords, n)
+                    section_chords = measure_chords[i:end]
+                    section_times = measure_times[i:end]
+                    section_xs = measure_xs[i:end]
+                    start_index = measure_start_index + i
+                    end_index = start_index + len(section_chords) - 1
+                    sections.append(MeasureSection(section_chords, section_times, section_xs, start_index, end_index))
+                    i = n - penult_len
+                    end = n
+                    section_chords = measure_chords[i:end]
+                    section_times = measure_times[i:end]
+                    section_xs = measure_xs[i:end]
+                    start_index = measure_start_index + i
+                    end_index = start_index + len(section_chords) - 1
+                    sections.append(MeasureSection(section_chords, section_times, section_xs, start_index, end_index))
+                    break
+            section_chords = measure_chords[i:end]
+            section_times = measure_times[i:end]
+            section_xs = measure_xs[i:end]
             start_index = measure_start_index + i
             end_index = start_index + len(section_chords) - 1
             sections.append(MeasureSection(section_chords, section_times, section_xs, start_index, end_index))
+            if end == n:
+                break
+            i += max_chords - 1  # overlap 1
 
         print(f"[Debug] Split measure {measure_index} into {len(sections)} sections.")
 
