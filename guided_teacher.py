@@ -61,6 +61,7 @@ class PracticeSectionTask(Task):
         self.teacher.midi_teacher.loop_enabled = True
         self.teacher.midi_teacher.loop_start = start_idx
         self.teacher.midi_teacher.loop_end = end_idx
+        self.teacher.midi_teacher.seek_to_index(start_idx)
         self._section_progress = None
         self._section_loop_info = None
 

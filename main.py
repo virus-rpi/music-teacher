@@ -53,10 +53,7 @@ sheet_alpha_target = sheet_alpha_current
 piano_tau = 0.12
 alpha_tau = 0.18
 
-try:
-    last_time_ms = pygame.time.get_ticks()
-except Exception:
-    last_time_ms = 0
+last_time_ms = pygame.time.get_ticks()
 
 dims = {
     'SCREEN_WIDTH': SCREEN_WIDTH,
@@ -110,15 +107,6 @@ def midi_listener():
                 else:
                     if synth_enabled:
                         synth.note_on(msg.note, msg.velocity)
-                if teaching_mode and not guided_mode:
-                    if midi_teacher.advance_if_pressed(pressed_notes_set):
-                        try:
-                            if midi_teacher.did_wrap_and_clear():
-                                sheet_music_renderer.seek_to_progress(midi_teacher.get_progress())
-                            else:
-                                sheet_music_renderer.advance_note()
-                        except Exception:
-                            pass
             elif msg.type in ("note_off", "note_on"):
                 pressed_keys[msg.note] = False
                 pressed_fade_keys.pop(msg.note, None)
@@ -156,10 +144,6 @@ while running:
                 print(f"Teaching mode: {teaching_mode}")
                 midi_teacher.reset()
                 pressed_notes_set.clear()
-                try:
-                    sheet_music_renderer.reset_note_index()
-                except Exception:
-                    pass
             if event.key == pygame.K_g:
                 guided_mode = not guided_mode
                 if guided_mode:
@@ -171,13 +155,6 @@ while running:
                 advanced = midi_teacher.advance_one()
                 if advanced:
                     print("[Debug] Advanced teacher by one chord.")
-                    try:
-                        if midi_teacher.did_wrap_and_clear():
-                            sheet_music_renderer.seek_to_progress(midi_teacher.get_progress())
-                        else:
-                            sheet_music_renderer.advance_note()
-                    except Exception:
-                        pass
                 else:
                     print("[Debug] Already at end; cannot advance.")
 
@@ -193,11 +170,6 @@ while running:
                 if event.key == pygame.K_LEFT:
                     step = -step
                 midi_teacher.seek_relative(step)
-                # sync sheet music view to teacher progress
-                try:
-                    sheet_music_renderer.seek_to_progress(midi_teacher.get_progress())
-                except Exception:
-                    pass
 
             # loop controls: set start/end and toggle
             if event.key == pygame.K_COMMA:  # ','
@@ -231,10 +203,6 @@ while running:
                 mods = pygame.key.get_mods()
                 if event.button == 1 and not (mods & (pygame.KMOD_SHIFT | pygame.KMOD_CTRL)):
                     midi_teacher.seek_to_progress(rel)
-                    try:
-                        sheet_music_renderer.seek_to_progress(midi_teacher.get_progress())
-                    except Exception:
-                        pass
                 elif event.button == 1 and (mods & pygame.KMOD_SHIFT):
                     # shift+left-click: set loop start
                     midi_teacher.set_loop_start_index(idx)
@@ -257,6 +225,8 @@ while running:
                     print(f"Set loop end to {le}")
 
                 pressed_notes_set.clear()
+
+    sheet_music_renderer.seek_to_index(midi_teacher.get_current_index())
 
     screen.fill(BG_COLOR)
 

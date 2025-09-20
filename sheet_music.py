@@ -406,64 +406,6 @@ class SheetMusicRenderer:
             if -4 <= sx <= view_w + 4:
                 pygame.draw.line(screen, (90, 255, 120), (int(sx), y), (int(sx), y + self.strip_height), 1)
 
-    def advance_note(self, step: int = 1) -> None:
-        """Advance the current note index by `step` and update target/playing positions.
-        Keeps the smooth scrolling behavior but resets the play-line smoothing so it follows the new note.
-        """
-        try:
-            idx = int(self._current_note_idx) + int(step)
-        except (TypeError, ValueError):
-            idx = int(step)
-        if self.notehead_xs:
-            idx = max(0, min(idx, len(self.notehead_xs) - 1))
-        else:
-            idx = max(0, idx)
-        if self.notehead_xs:
-            try:
-                view_w, x_off = self._compute_view_and_xoff()
-                self._init_screen_play_x(view_w, x_off)
-            except (AttributeError, TypeError, ValueError):
-                pass
-
-        self._current_note_idx = idx
-        self._compute_target_offset(self.screen_width, 0.0)
-
-        try:
-            self._last_time_ms = pygame.time.get_ticks()
-        except (pygame.error, AttributeError):
-            pass
-
-    def reset_note_index(self) -> None:
-        """Reset the current note index to the start and jump view to that position."""
-        self.seek_to_index(0)
-
-    def seek_to_progress(self, progress: float, animate: bool = True) -> None:
-        """Seek the sheet view to relative progress (0.0-1.0).
-        If visual note positions are available, map progress to a note index and seek to it.
-        Otherwise, jump or animate the view offset directly depending on `animate`.
-        """
-        p = min(max(float(progress), 0.0), 1.0)
-        if self.notehead_xs:
-            count = len(self.notehead_xs)
-            idx = int(round(p * (count - 1))) if count > 0 else 0
-            self.seek_to_index(idx, animate=animate)
-            return
-        max_off = max(0, self.full_width - self.screen_width)
-        self._target_x_off = float(int(p * max_off))
-        if animate:
-            try:
-                if self._screen_play_x is None:
-                    self._screen_play_x = float(int(self.screen_width * 0.45))
-            except (AttributeError, TypeError, ValueError):
-                pass
-        else:
-            self.view_x_off = float(self._target_x_off)
-            self._screen_play_x = None
-        try:
-            self._last_time_ms = pygame.time.get_ticks()
-        except (pygame.error, AttributeError):
-            pass
-
     def seek_to_index(self, index: int, animate: bool = True) -> None:
         """Seek directly to a visual note index (clamped).
         If animate is True, smoothly scrolls the view to the new target.
