@@ -293,17 +293,16 @@ class SheetMusicRenderer:
         overlay = pygame.Surface((view_w, self.strip_height), pygame.SRCALPHA)
         overlay.blit(self.full_surface, (0, 0), src_rect)
 
-        if guided_teacher is not None:
-            self._draw_guided_overlay_rect(overlay, guided_teacher, x_off)
-
         screen_play_x = self._compute_screen_play_x(view_w, x_off, dt)
-        self._draw_overlay(overlay, 0, view_w, screen_play_x)
+        current_note_highlight = self._draw_overlay(overlay, view_w, screen_play_x)
+        if guided_teacher is not None:
+            self._draw_guided_highlight(overlay, guided_teacher, x_off, current_note_highlight)
         self._draw_debug_lines(overlay, 0, x_off, view_w)
         aa = max(0.0, min(1.0, float(alpha)))
         overlay.set_alpha(int(aa * 255))
         screen.blit(overlay, (0, y))
 
-    def _draw_guided_overlay_rect(self, screen, guided_teacher, x_off):
+    def _draw_guided_highlight(self, screen, guided_teacher, x_off, current_note_highlight=None):
         if not guided_teacher.is_active or not guided_teacher.current_section_visual_info:
             return
         padding = 12
@@ -341,6 +340,12 @@ class SheetMusicRenderer:
             cur_rect = state['target']
         overlay = pygame.Surface((cur_rect[2], cur_rect[3]), pygame.SRCALPHA)
         pygame.draw.rect(overlay, rect_color, (0, 0, cur_rect[2], cur_rect[3]), border_radius=10)
+        overlay.blit(
+            pygame.Surface((current_note_highlight[2], current_note_highlight[3]), pygame.SRCALPHA) if current_note_highlight else pygame.Surface((0, 0), pygame.SRCALPHA),
+            (current_note_highlight[0]-cur_rect[0], 0) if current_note_highlight else (0, 0),
+            None,
+            pygame.BLEND_RGBA_MULT
+        )
         screen.blit(overlay, (cur_rect[0]-x_off, cur_rect[1]))
 
     def _compute_target_offset(self, view_w: int, progress: float) -> None:
@@ -421,20 +426,20 @@ class SheetMusicRenderer:
             x_off = int(round(self.view_x_off)) if hasattr(self, '_view_x_off') else 0
         return view_w, x_off
 
-    def _draw_overlay(self, screen: pygame.Surface, y: int, view_w: int, screen_play_x: float) -> None:
+    def _draw_overlay(self, screen: pygame.Surface, view_w: int, screen_play_x: float):
         overlay = pygame.Surface((view_w, self.strip_height), pygame.SRCALPHA)
         rect_w = 30
         rect_h = self.strip_height
         rect_x = int(round(screen_play_x - rect_w // 2))
-        rect_y = 0
         rect_color = (0, 200, 255, 128)
         try:
-            pygame.draw.rect(overlay, rect_color, (rect_x, rect_y, rect_w, rect_h))
+            pygame.draw.rect(overlay, rect_color, (rect_x, 0, rect_w, rect_h))
         except (pygame.error, TypeError):
             pass
         line_color = (0, 200, 255, 200)
         pygame.draw.line(overlay, line_color, (int(round(screen_play_x)), 0), (int(round(screen_play_x)), rect_h), 3)
-        screen.blit(overlay, (0, y))
+        screen.blit(overlay, (0, 0))
+        return rect_x, 0, rect_w, rect_h
 
     def _draw_debug_lines(self, screen: pygame.Surface, y: int, x_off: int, view_w: int) -> None:
         if not self.debug:
