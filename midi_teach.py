@@ -154,9 +154,6 @@ class MidiTeacher:
         self._last_wrapped = False
         return w
 
-    def get_chord_times(self):
-        return list(self.chord_times)
-
     def _set_measure_data(self):
         if not self.sheet_music_renderer:
             return
