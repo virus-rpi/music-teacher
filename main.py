@@ -132,6 +132,7 @@ def midi_listener():
                     else:
                         if synth_enabled:
                             synth.play_error_sound()
+                    midi_teacher.advance_if_pressed(pressed_notes_set)
                 else:
                     if synth_enabled:
                         synth.note_on(msg.note, msg.velocity)

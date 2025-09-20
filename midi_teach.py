@@ -63,6 +63,15 @@ class MidiTeacher:
             return 1.0
         return self.current_index / max(1, total - 1)
 
+    def advance_if_pressed(self, pressed_notes):
+        self._last_wrapped = False
+        next_notes = self.get_next_notes()
+        if next_notes and set(next_notes.keys()).issubset(pressed_notes):
+            self.current_index += 1
+            if self.loop_enabled and self.current_index > self.loop_end:
+                self.current_index = self.loop_start
+                self._last_wrapped = True
+
     def advance_one(self):
         self._last_wrapped = False
         if not self.chords:
@@ -150,6 +159,7 @@ class MidiTeacher:
         return int(self.current_index)
 
     def did_wrap_and_clear(self) -> bool:
+        """Returns True if it looped around and then clears the flag."""
         w = bool(self._last_wrapped)
         self._last_wrapped = False
         return w
