@@ -109,11 +109,9 @@ class PracticeSectionTask(Task):
                     self.teacher.next_task()
 
     def _handle_midi_events(self, pressed_notes: set[int], pressed_note_events):
-        now = time.time()
-
-        if len(self.recording) == 0 and len(pressed_notes) > 0:
-            self.timer_start = now
-            self._last_record_time = now
+        if len(self.recording) == 0 and len(pressed_note_events) > 0:
+            earliest = min(ev.time for ev in pressed_note_events if hasattr(ev, 'time'))
+            self.timer_start = earliest
 
         if self._last_record_time is None and self.timer_start is not None:
             self._last_record_time = self.timer_start
@@ -122,18 +120,29 @@ class PracticeSectionTask(Task):
         new_notes = current - self._prev_pressed_notes
         released_notes = self._prev_pressed_notes - current
 
-        def append_msg(msg: mido.Message):
-            nonlocal now
-            delta_ms = int((now - self._last_record_time) * 1000)
+        def append_msg(msg: mido.Message, timestamp_s: float):
+            if self._last_record_time is None:
+                delta_ms = 0
+            else:
+                delta_ms = max(int((timestamp_s - self._last_record_time) * 1000), 0)
             msg.time = delta_ms
             self.recording.append(msg)
-            self._last_record_time = now
+            self._last_record_time = timestamp_s
 
         for note in sorted(new_notes):
-            vel = next((ev.velocity for ev in pressed_note_events if ev.note == note), 127)
-            append_msg(mido.Message('note_on', note=note, velocity=vel))
+            ev = next((ev for ev in pressed_note_events if ev.note == note), None)
+            if ev is not None and hasattr(ev, 'time'):
+                t = ev.time
+                vel = getattr(ev, 'velocity', 127)
+            else:
+                t = time.time()
+                vel = 127
+            append_msg(mido.Message('note_on', note=note, velocity=vel), t)
+
+        now = time.time()
         for note in sorted(released_notes):
-            append_msg(mido.Message('note_off', note=note, velocity=0))
+            append_msg(mido.Message('note_off', note=note, velocity=0), now)
+
         self._prev_pressed_notes = current
 
     def _handle_evaluate(self):
@@ -267,11 +276,10 @@ class PracticeSectionTask(Task):
 
         score = (0.7 * accuracy_score) + (0.2 * relative_score) + (0.1 * absolute_score)
         score = max(0.0, min(1.0, score))
-        print(f"Eval: accuracy={accuracy_score:.3f} rel={relative_score:.3f} abs={absolute_score:.3f} -> score={score:.3f}")
 
         self.teacher.last_score = score
         print(f"Eval: accuracy={accuracy_score:.3f} rel={relative_score:.3f} abs={absolute_score:.3f} -> score={score:.3f}")
-        if score > 0.8:
+        if score > 0.9:
             self.teacher.next_task()
 
 class PracticeMeasureTask(PracticeSectionTask):

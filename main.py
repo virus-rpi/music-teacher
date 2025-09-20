@@ -1,3 +1,4 @@
+import time
 import pygame
 import mido
 import threading
@@ -123,6 +124,7 @@ def midi_listener():
                 pressed_keys[msg.note] = True
                 pressed_fade_keys[msg.note] = pygame.time.get_ticks()
                 pressed_notes_set.add(msg.note)
+                msg.time = time.time()
                 pressed_note_events.append(msg)
                 if teaching_mode:
                     next_notes = midi_teacher.get_next_notes()
