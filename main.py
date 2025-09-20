@@ -123,7 +123,7 @@ def midi_listener():
                 pressed_keys[msg.note] = True
                 pressed_fade_keys[msg.note] = pygame.time.get_ticks()
                 pressed_notes_set.add(msg.note)
-                pressed_note_events.append((msg.note, pygame.time.get_ticks()))
+                pressed_note_events.append(msg)
                 if teaching_mode:
                     next_notes = midi_teacher.get_next_notes()
                     if msg.note in next_notes:
@@ -140,6 +140,10 @@ def midi_listener():
                 pressed_keys[msg.note] = False
                 pressed_fade_keys.pop(msg.note, None)
                 pressed_notes_set.discard(msg.note)
+                for i, note_event in enumerate(pressed_note_events):
+                    if note_event.note == msg.note:
+                        del pressed_note_events[i]
+                        break
                 if synth_enabled:
                     synth.note_off(msg.note)
             elif msg.type == "control_change":

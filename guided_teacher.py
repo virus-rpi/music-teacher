@@ -1,6 +1,8 @@
 import time
 from collections import deque
 from dataclasses import dataclass
+
+import mido
 import pygame
 from midi_teach import MidiTeacher
 from synth import Synth
@@ -64,6 +66,12 @@ class PracticeSectionTask(Task):
         self.start_idx = section.start_idx
         self.end_idx = section.end_idx
 
+        self.timer_start = None
+        self.recording = mido.MidiTrack()
+        # tracking to avoid repeated on/off messages while a key remains held
+        self._prev_pressed_notes = set()
+        self._last_record_time = None
+
     def on_start(self):
         self.teacher.current_section_visual_info = self.section.xs
         self.teacher.midi_teacher.loop_enabled = True
@@ -78,6 +86,15 @@ class PracticeSectionTask(Task):
 
     def on_tick(self, pressed_notes, pressed_note_events, pygame_events):
         self._handle_pygame_events(pygame_events)
+        self._handle_midi_events(pressed_notes, pressed_note_events)
+
+        if self.teacher.midi_teacher.did_wrap_and_clear():
+            self._handle_evaluate()
+
+            self.recording.clear()
+            self._prev_pressed_notes.clear()
+            self.timer_start = None
+            self._last_record_time = None
 
     def _handle_pygame_events(self, pygame_events):
         for event in pygame_events:
@@ -90,6 +107,37 @@ class PracticeSectionTask(Task):
                     self.teacher.previous_task()
                 elif event.key == pygame.K_RETURN:
                     self.teacher.next_task()
+
+    def _handle_midi_events(self, pressed_notes: set[int], pressed_note_events):
+        now = time.time()
+
+        if len(self.recording) == 0 and len(pressed_notes) > 0:
+            self.timer_start = now
+            self._last_record_time = now
+
+        if self._last_record_time is None and self.timer_start is not None:
+            self._last_record_time = self.timer_start
+
+        new_notes = pressed_notes - self._prev_pressed_notes
+        released_notes = self._prev_pressed_notes - pressed_notes
+
+        def append_msg(msg: mido.Message):
+            nonlocal now
+            delta_ms = int((now - self._last_record_time) * 1000)
+            msg.time = delta_ms
+            self.recording.append(msg)
+            self._last_record_time = now
+
+        for note in sorted(new_notes):
+            vel = next((ev.velocity for ev in pressed_note_events if ev.note == note), 127)
+            append_msg(mido.Message('note_on', note=note, velocity=vel))
+        for note in sorted(released_notes):
+            append_msg(mido.Message('note_off', note=note, velocity=0))
+        self._prev_pressed_notes = pressed_notes
+
+    def _handle_evaluate(self):
+        print(self.recording)
+        # TODO: evaluate
 
 class PracticeMeasureTask(PracticeSectionTask):
     def __init__(self, teacher: 'GuidedTeacher', measure):
