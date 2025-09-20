@@ -1,8 +1,173 @@
 from collections import deque
 from midi_teach import MidiTeacher
 from synth import Synth
+from abc import ABC, abstractmethod
 
 NOTES_PER_SECTION = 4
+
+class Task(ABC):
+    def __init__(self, teacher: 'GuidedTeacher'):
+        self.teacher = teacher
+
+    @abstractmethod
+    def on_start(self):
+        pass
+
+    @abstractmethod
+    def on_end(self):
+        pass
+
+    @abstractmethod
+    def on_tick(self, pressed_notes, pressed_note_events):
+        pass
+
+class PlaybackMeasureTask(Task):
+    def __init__(self, teacher, measure):
+        super().__init__(teacher)
+        self.measure = measure
+
+    def on_start(self):
+        self.teacher.synth.play_measure(self.measure, self.teacher.midi_teacher)
+        self.teacher.next_task()
+
+    def on_end(self):
+        pass
+
+    def on_tick(self, pressed_notes, pressed_note_events):
+        pass
+
+class PracticeSectionTask(Task):
+    def __init__(self, teacher, section, measure):
+        super().__init__(teacher)
+        self.section = section
+        self.measure = measure
+        self._section_progress = None
+        self._section_loop_info = None
+
+    def on_start(self):
+        self.teacher.current_section_visual_info = self.section[2]
+        measure_chords, _, _, _ = self.teacher.midi_teacher.get_notes_for_measure(self.measure)
+        section_chords = self.section[0]
+        start_idx = next(i for i in range(len(measure_chords)) if measure_chords[i] == section_chords[0])
+        end_idx = start_idx + len(section_chords) - 1
+        self.teacher.midi_teacher.loop_enabled = True
+        self.teacher.midi_teacher.loop_start = start_idx
+        self.teacher.midi_teacher.loop_end = end_idx
+        self._section_progress = None
+        self._section_loop_info = None
+
+    def on_end(self):
+        self.teacher.midi_teacher.loop_enabled = False
+        self.teacher.current_section_visual_info = None
+
+    def on_tick(self, pressed_notes, pressed_note_events):
+        teacher = self.teacher
+        section_chords, section_times, _ = self.section
+        if not pressed_note_events:
+            return
+        if not self._section_loop_info or self._section_loop_info.get('section_id') != id(self.section):
+            measure_chords, _, _, _ = teacher.midi_teacher.get_notes_for_measure(self.measure)
+            start_idx = next(i for i in range(len(measure_chords)) if measure_chords[i] == section_chords[0])
+            end_idx = start_idx + len(section_chords) - 1
+            teacher.midi_teacher.set_loop_start_index(start_idx)
+            teacher.midi_teacher.set_loop_end_index(end_idx)
+            teacher.midi_teacher.loop_enabled = True
+            teacher.midi_teacher.seek_to_index(start_idx)
+            teacher.synth.play_notes(section_chords, section_times)
+            self._section_loop_info = {'section_id': id(self.section), 'start_idx': start_idx, 'end_idx': end_idx}
+            self._section_progress = {
+                'section_id': id(self.section),
+                'chord_idx': 0,
+                'matched_events': []
+            }
+            return
+        if teacher.midi_teacher.did_wrap_and_clear():
+            matched_events = self._section_progress['matched_events']
+            eval_pressed_notes = set(n for notes, _ in matched_events for n in (notes if isinstance(notes, (list, tuple, set)) else [notes]))
+            eval_pressed_note_events = [(notes, ts) for notes, ts in matched_events]
+            teacher.last_score = evaluate_performance(section_chords, section_times, eval_pressed_notes, eval_pressed_note_events)
+            if teacher.last_score >= 0.8:
+                teacher.history.append(self)
+                self._section_progress = {}
+                self._section_loop_info = {}
+                teacher.midi_teacher.loop_enabled = False
+                teacher.next_task()
+                return
+            else:
+                self._section_progress = {
+                    'section_id': id(self.section),
+                    'chord_idx': 0,
+                    'matched_events': []
+                }
+            return
+        chord_idx = self._section_progress['chord_idx']
+        matched_events = self._section_progress['matched_events']
+        while chord_idx < len(section_chords) and pressed_note_events:
+            expected_chord = set(note for note, _ in section_chords[chord_idx])
+            for i, (notes, timestamp) in enumerate(pressed_note_events):
+                if isinstance(notes, int):
+                    played_set = {notes}
+                else:
+                    played_set = set(notes)
+                if expected_chord.issubset(played_set):
+                    matched_events.append((notes, timestamp))
+                    chord_idx += 1
+                    pressed_note_events = pressed_note_events[i+1:]
+                    break
+            else:
+                break
+        self._section_progress['chord_idx'] = chord_idx
+        self._section_progress['matched_events'] = matched_events
+        if chord_idx == len(section_chords):
+            eval_pressed_notes = set(n for notes, _ in matched_events for n in (notes if isinstance(notes, (list, tuple, set)) else [notes]))
+            eval_pressed_note_events = [(notes, ts) for notes, ts in matched_events]
+            teacher.last_score = evaluate_performance(section_chords, section_times, eval_pressed_notes, eval_pressed_note_events)
+            if teacher.last_score >= 0.8:
+                teacher.history.append(self)
+                self._section_progress = {}
+                teacher.next_task()
+            else:
+                self._section_progress = {}
+
+class PracticeMeasureTask(Task):
+    def __init__(self, teacher, measure):
+        super().__init__(teacher)
+        self.measure = measure
+
+    def on_start(self):
+        pass
+
+    def on_end(self):
+        pass
+
+    def on_tick(self, pressed_notes, pressed_note_events):
+        teacher = self.teacher
+        measure_chords, measure_times, _, _ = teacher.midi_teacher.get_notes_for_measure(self.measure)
+        teacher.last_score = evaluate_performance(measure_chords, measure_times, pressed_notes, pressed_note_events)
+        if teacher.last_score >= 0.8:
+            teacher.history.append(self)
+            teacher.next_task()
+
+class PracticeTransitionTask(Task):
+    def __init__(self, teacher, from_measure, to_measure):
+        super().__init__(teacher)
+        self.from_measure = from_measure
+        self.to_measure = to_measure
+
+    def on_start(self):
+        pass
+
+    def on_end(self):
+        pass
+
+    def on_tick(self, pressed_notes, pressed_note_events):
+        teacher = self.teacher
+        transition_chords, transition_times, _ = teacher.get_transition_notes(self.from_measure, self.to_measure)
+        teacher.last_score = evaluate_performance(transition_chords, transition_times, pressed_notes, pressed_note_events)
+        if teacher.last_score >= 0.8:
+            teacher.history.append(self)
+            teacher.current_measure_index += 1
+            teacher.generate_tasks_for_measure(teacher.current_measure_index)
 
 class GuidedTeacher:
     def __init__(self, midi_teacher: MidiTeacher, synth: Synth):
@@ -26,7 +191,7 @@ class GuidedTeacher:
         self.is_active = True
         self._loop_info_before = (self.midi_teacher.loop_enabled, self.midi_teacher.loop_start, self.midi_teacher.loop_end)
         self.current_measure_index = 0
-        self._generate_tasks_for_measure(self.current_measure_index)
+        self.generate_tasks_for_measure(self.current_measure_index)
 
     def stop(self):
         self.is_active = False
@@ -36,31 +201,33 @@ class GuidedTeacher:
         self.midi_teacher.loop_enabled, self.midi_teacher.loop_start, self.midi_teacher.loop_end = self._loop_info_before
 
     def update(self, pressed_notes, pressed_note_events):
-        if not self.is_active or not self.current_task:
+        if not self.is_active:
             return
+        if not self.current_task and self.tasks:
+            self.next_task()
+        self.current_task.on_tick(pressed_notes, pressed_note_events)
 
-        if self.current_task['type'] == 'practice_section':
-            self._handle_practice_section(pressed_notes, pressed_note_events)
-        elif self.current_task['type'] == 'practice_measure':
-            self._handle_practice_measure(pressed_notes, pressed_note_events)
-        elif self.current_task['type'] == 'practice_transition':
-            self._handle_practice_transition(pressed_notes, pressed_note_events)
-
-    def _generate_tasks_for_measure(self, measure_index):
+    def generate_tasks_for_measure(self, measure_index):
         self.tasks.clear()
-        self.measure_sections = self._split_measure_into_sections(measure_index)
+        self.measure_sections = self.split_measure_into_sections(measure_index)
 
-        self.tasks.append({'type': 'playback_measure', 'measure': measure_index})
-
+        self.tasks.append(PlaybackMeasureTask(self, measure_index))
         for section in self.measure_sections:
-            self.tasks.append({'type': 'practice_section', 'section': section, 'measure': measure_index})
-        
-        self.tasks.append({'type': 'practice_measure', 'measure': measure_index})
-        self.tasks.append({'type': 'practice_transition', 'from_measure': measure_index, 'to_measure': measure_index + 1})
-        
-        self._next_task()
+            self.tasks.append(PracticeSectionTask(self, section, measure_index))
+        self.tasks.append(PracticeMeasureTask(self, measure_index))
+        self.tasks.append(PracticeTransitionTask(self, measure_index, measure_index + 1))
 
-    def _split_measure_into_sections(self, measure_index):
+    def next_task(self):
+        if self.current_task:
+            self.current_task.on_end()
+        if self.tasks:
+            self.current_task = self.tasks.popleft()
+            self.current_task.on_start()
+        else:
+            self.current_task = None
+            self.stop()
+
+    def split_measure_into_sections(self, measure_index):
         measure_chords, measure_times, measure_xs, _ = self.midi_teacher.get_notes_for_measure(measure_index)
         if not measure_chords:
             return []
@@ -78,122 +245,22 @@ class GuidedTeacher:
 
         return sections
 
-    def _handle_practice_section(self, pressed_notes, pressed_note_events):
-        if not pressed_note_events:
-            return
-
-        section_chords, section_times, _ = self.current_task['section']
-
-        if not hasattr(self, '_section_loop_info') or self._section_loop_info.get('section_id') != id(self.current_task['section']):
-            measure_index = self.current_task['measure']
-            measure_chords, _, _, _ = self.midi_teacher.get_notes_for_measure(measure_index)
-            try:
-                start_idx = next(i for i in range(len(measure_chords)) if measure_chords[i] == section_chords[0])
-                end_idx = start_idx + len(section_chords) - 1
-            except Exception:
-                start_idx = 0
-                end_idx = len(section_chords) - 1
-            self.midi_teacher.set_loop_start_index(start_idx)
-            self.midi_teacher.set_loop_end_index(end_idx)
-            self.midi_teacher.loop_enabled = True
-            self.midi_teacher.seek_to_index(start_idx)
-            self.synth.play_notes(section_chords, section_times)
-            self._section_loop_info = {'section_id': id(self.current_task['section']), 'start_idx': start_idx, 'end_idx': end_idx}
-            self._section_progress = {
-                'section_id': id(self.current_task['section']),
-                'chord_idx': 0,
-                'matched_events': []
-            }
-            return
-
-        if self.midi_teacher.did_wrap_and_clear():
-            chord_idx = self._section_progress['chord_idx']
-            matched_events = self._section_progress['matched_events']
-            eval_pressed_notes = set(n for notes, _ in matched_events for n in (notes if isinstance(notes, (list, tuple, set)) else [notes]))
-            eval_pressed_note_events = [(notes, ts) for notes, ts in matched_events]
-            self.last_score = self._evaluate_performance(section_chords, section_times, eval_pressed_notes, eval_pressed_note_events)
-            if self.last_score >= 0.8:
-                self.history.append(self.current_task)
-                self._section_progress = {}
-                self._section_loop_info = {}
-                self.midi_teacher.loop_enabled = False
-                self._next_task()
-                return
-            else:
-                self._section_progress = {
-                    'section_id': id(self.current_task['section']),
-                    'chord_idx': 0,
-                    'matched_events': []
-                }
-            return
-
-        # --- Normal chord matching logic (collect events for evaluation) ---
-        chord_idx = self._section_progress['chord_idx']
-        matched_events = self._section_progress['matched_events']
-        # Try to match the next chord in order, allowing extra notes and handling single-note events
-        while chord_idx < len(section_chords) and pressed_note_events:
-            expected_chord = set(note for note, _ in section_chords[chord_idx])
-            for i, (notes, timestamp) in enumerate(pressed_note_events):
-                # Ensure notes is always a set
-                if isinstance(notes, int):
-                    played_set = {notes}
-                else:
-                    played_set = set(notes)
-                # Only require all expected notes to be present (ignore extra notes)
-                if expected_chord.issubset(played_set):
-                    matched_events.append((notes, timestamp))
-                    chord_idx += 1
-                    pressed_note_events = pressed_note_events[i+1:]
-                    break
-            else:
-                break
-
-        self._section_progress['chord_idx'] = chord_idx
-        self._section_progress['matched_events'] = matched_events
-
-        # If all chords matched in order, evaluate
-        if chord_idx == len(section_chords):
-            # Build pressed_notes and pressed_note_events for evaluation (record all notes, including wrong ones)
-            eval_pressed_notes = set(n for notes, _ in matched_events for n in (notes if isinstance(notes, (list, tuple, set)) else [notes]))
-            eval_pressed_note_events = [(notes, ts) for notes, ts in matched_events]
-            self.last_score = self._evaluate_performance(section_chords, section_times, eval_pressed_notes, eval_pressed_note_events)
-
-            if self.last_score >= 0.8:
-                self.history.append(self.current_task)
-                self._section_progress = {}  # Reset for next section
-                self._next_task()
-            else:
-                self._section_progress = {}  # Reset for retry
-
-    def _handle_practice_measure(self, pressed_notes, pressed_note_events):
-        measure_index = self.current_task['measure']
-        measure_chords, measure_times, _, _ = self.midi_teacher.get_notes_for_measure(measure_index)
-        self.last_score = self._evaluate_performance(measure_chords, measure_times, pressed_notes, pressed_note_events)
-
-        if self.last_score >= 0.8:
-            self.history.append(self.current_task)
-            self._next_task()
-
-    def _handle_practice_transition(self, pressed_notes, pressed_note_events):
-        from_measure = self.current_task['from_measure']
-        to_measure = self.current_task['to_measure']
-        
-        transition_chords, transition_times, _ = self._get_transition_notes(from_measure, to_measure)
-        self.last_score = self._evaluate_performance(transition_chords, transition_times, pressed_notes, pressed_note_events)
-
-        if self.last_score >= 0.8:
-            self.history.append(self.current_task)
-            self.current_measure_index += 1
-            self._generate_tasks_for_measure(self.current_measure_index)
-
-    def _get_transition_notes(self, from_measure, to_measure):
+    def get_transition_notes(self, from_measure, to_measure):
         from_chords, from_times, from_xs = self.midi_teacher.get_notes_for_measure(from_measure)
         to_chords, to_times, to_xs = self.midi_teacher.get_notes_for_measure(to_measure)
         if not from_chords or not to_chords:
             return [], [], []
         return from_chords[-2:] + to_chords[:2], from_times[-2:] + to_times[:2], from_xs[-2:] + to_xs[:2]
 
-    def _evaluate_performance(self, expected_chords, expected_times, pressed_notes, pressed_note_events):
+    def repeat_measure(self):
+        if self.current_task and hasattr(self.current_task, 'measure'):
+            self.synth.play_measure(self.current_task.measure, self.midi_teacher)
+
+    def get_current_task_info(self):
+        return self.current_task
+
+
+def evaluate_performance(expected_chords, expected_times, pressed_notes, pressed_note_events):
         if not expected_chords:
             return 1.0
         if not pressed_note_events:
@@ -229,31 +296,3 @@ class GuidedTeacher:
 
         final_score = (accuracy * 1.0) + (relative_timing_score * 0.6) + (absolute_timing_score * 0.2)
         return final_score / (1.0 + 0.6 + 0.2)
-
-    def _next_task(self):
-        if self.tasks:
-            self.current_task = self.tasks.popleft()
-            if self.current_task['type'] == 'practice_section':
-                self.current_section_visual_info = self.current_task['section'][2]
-                section_chords = self.current_task['section'][0]
-                measure_index = self.current_task['measure']
-                measure_chords, _, _, _ = self.midi_teacher.get_notes_for_measure(measure_index)
-                start_idx = next(i for i in range(len(measure_chords)) if measure_chords[i] == section_chords[0])
-                end_idx = start_idx + len(section_chords) - 1
-                self.midi_teacher.loop_enabled = True
-                self.midi_teacher.loop_start = start_idx
-                self.midi_teacher.loop_end = end_idx
-                self._section_loop_info = {}
-            else:
-                self.current_section_visual_info = None
-        else:
-            self.stop()
-
-    def repeat_measure(self):
-        if self.current_task:
-            measure_index = self.current_task.get('measure')
-            if measure_index is not None:
-                self.synth.play_measure(measure_index, self.midi_teacher)
-
-    def get_current_task_info(self):
-        return self.current_task
