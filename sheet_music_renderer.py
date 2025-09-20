@@ -302,16 +302,22 @@ def extract_measure_data(svg: SVG):
     measure_data = []
     for group in [g for g in list(svg.elements())[1:] if isinstance(g, Group)]:
         for measure_group in [mg for mg in list(group) if isinstance(mg, Group) and 'Measure' in mg.values.get('id', '')]:
-            notes = []
+            note_xs = []
             for note_element in [n for n in list(measure_group) if 'Note' in n.values.get('class', '')]:
                 try:
                     bb = note_element.bbox()
                     if bb:
                         x = (bb[0] + bb[2]) / 2.0
-                        notes.append({'x': x, 'element': note_element})
+                        note_xs.append(x)
                 except Exception:
                     continue
-            measure_data.append(notes)
+            if note_xs:
+                start_x = float(note_xs[0])
+                end_x = float(note_xs[-1])
+                n_notes = len(note_xs)
+                measure_data.append((start_x, end_x, n_notes))
+            else:
+                measure_data.append((None, None, 0))
     return measure_data
 
 def bracket_groups_to_long_strip(svg: SVG) -> SVG:

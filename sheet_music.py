@@ -24,7 +24,7 @@ class SheetMusicRenderer:
         self.notehead_xs: list[int] = []
         self.measure_data: list = []
         self._current_note_idx: int = 0
-        self._view_x_off: float = 0.0
+        self.view_x_off: float = 0.0
         self._target_x_off: float = 0.0
         self._scroll_tau: float = 0.08
         self._screen_play_x: Optional[float] = None
@@ -68,16 +68,14 @@ class SheetMusicRenderer:
         if measure_data_cache.exists():
             try:
                 with measure_data_cache.open("r", encoding="utf-8") as fh:
-                    # We need to deserialize the element objects correctly
-                    # For now, we'll just load the x coordinates and assume the structure
                     raw_measure_data = json.load(fh)
                     self.measure_data = []
-                    for measure in raw_measure_data:
-                        notes_in_measure = []
-                        for note_info in measure:
-                            # Reconstruct the note info, element will be None
-                            notes_in_measure.append({'x': note_info['x'], 'element': None})
-                        self.measure_data.append(notes_in_measure)
+                    for tup in raw_measure_data:
+                        if tup is not None and len(tup) == 3:
+                            sx, ex, n = tup
+                            self.measure_data.append((float(sx) if sx is not None else None, float(ex) if ex is not None else None, int(n)))
+                        else:
+                            self.measure_data.append((None, None, 0))
             except (json.JSONDecodeError, OSError, ValueError, TypeError) as e:
                 print(f"SheetMusicRenderer: failed to load measure data cache: {e}")
                 self.measure_data = []
@@ -104,13 +102,14 @@ class SheetMusicRenderer:
             if isinstance(res_measure_data, list):
                 try:
                     with measure_data_cache.open("w", encoding="utf-8") as fh:
-                        # We only care about the x coordinate for caching
+                        # Save as list of (start_x, end_x, n_notes)
                         serializable_measure_data = []
-                        for measure in res_measure_data:
-                            serializable_measure = []
-                            for note_info in measure:
-                                serializable_measure.append({'x': note_info['x']})
-                            serializable_measure_data.append(serializable_measure)
+                        for tup in res_measure_data:
+                            if tup is not None and len(tup) == 3:
+                                sx, ex, n = tup
+                                serializable_measure_data.append([sx, ex, n])
+                            else:
+                                serializable_measure_data.append([None, None, 0])
                         json.dump(serializable_measure_data, fh)
                 except (OSError, TypeError, ValueError) as e:
                     print(f"SheetMusicRenderer: failed to save measure data: {e}")
@@ -197,10 +196,46 @@ class SheetMusicRenderer:
                 pxs.append(int(round(x_adj_px * final_scale)))
             pxs = sorted(set(pxs))
             self.notehead_xs = pxs
+
+            # Scale measure_data start_x and end_x
+            if self.measure_data:
+                scaled_measure_data = []
+                for tup in self.measure_data:
+                    if tup is not None and len(tup) == 3:
+                        sx, ex, n = tup
+                        if sx is not None:
+                            try:
+                                sx_px = float(sx) * pixels_per_svg_unit
+                                sx_adj_px = sx_px - float(left_crop)
+                                if 0 <= sx_adj_px <= float(cropped_w):
+                                    sx_scaled = int(round(sx_adj_px * final_scale))
+                                else:
+                                    sx_scaled = None
+                            except Exception:
+                                sx_scaled = None
+                        else:
+                            sx_scaled = None
+                        if ex is not None:
+                            try:
+                                ex_px = float(ex) * pixels_per_svg_unit
+                                ex_adj_px = ex_px - float(left_crop)
+                                if 0 <= ex_adj_px <= float(cropped_w):
+                                    ex_scaled = int(round(ex_adj_px * final_scale))
+                                else:
+                                    ex_scaled = None
+                            except Exception:
+                                ex_scaled = None
+                        else:
+                            ex_scaled = None
+                        scaled_measure_data.append((sx_scaled, ex_scaled, int(n)))
+                    else:
+                        scaled_measure_data.append((None, None, 0))
+                self.measure_data = scaled_measure_data
         except (TypeError, ValueError, ZeroDivisionError) as e:
             if self.debug:
-                print("Failed to scale cached note x positions:", e)
+                print("Failed to scale cached note x positions and measure data:", e)
             self.notehead_xs = []
+            self.measure_data = []
 
     def _prepare_strip(self) -> None:
         cache_dir = self._get_cache_dir()
@@ -252,7 +287,7 @@ class SheetMusicRenderer:
         self._compute_target_offset(view_w, progress)
         dt = self._update_view_smoothing()
 
-        x_off = int(round(max(0.0, min(self._view_x_off, float(max(0, self.full_width - view_w))))))
+        x_off = int(round(max(0.0, min(self.view_x_off, float(max(0, self.full_width - view_w))))))
         src_rect = pygame.Rect(x_off, 0, view_w, self.strip_height)
 
         overlay = pygame.Surface((view_w, self.strip_height), pygame.SRCALPHA)
@@ -285,9 +320,9 @@ class SheetMusicRenderer:
         self._last_time_ms = now_ms
         if dt > 0.0:
             alpha = 1.0 - math.exp(-dt / max(1e-6, self._scroll_tau))
-            self._view_x_off += (self._target_x_off - self._view_x_off) * alpha
-            if abs(self._target_x_off - self._view_x_off) < 0.5:
-                self._view_x_off = float(self._target_x_off)
+            self.view_x_off += (self._target_x_off - self.view_x_off) * alpha
+            if abs(self._target_x_off - self.view_x_off) < 0.5:
+                self.view_x_off = float(self._target_x_off)
         return dt
 
     def _compute_screen_play_x(self, view_w: int, x_off: int, dt: float) -> float:
@@ -338,9 +373,9 @@ class SheetMusicRenderer:
         """
         view_w = self.screen_width
         try:
-            x_off = int(round(max(0.0, min(self._view_x_off, float(max(0, self.full_width - view_w))))))
+            x_off = int(round(max(0.0, min(self.view_x_off, float(max(0, self.full_width - view_w))))))
         except (AttributeError, TypeError, ValueError):
-            x_off = int(round(self._view_x_off)) if hasattr(self, '_view_x_off') else 0
+            x_off = int(round(self.view_x_off)) if hasattr(self, '_view_x_off') else 0
         return view_w, x_off
 
     def _draw_overlay(self, screen: pygame.Surface, y: int, view_w: int, screen_play_x: float) -> None:
@@ -422,7 +457,7 @@ class SheetMusicRenderer:
             except (AttributeError, TypeError, ValueError):
                 pass
         else:
-            self._view_x_off = float(self._target_x_off)
+            self.view_x_off = float(self._target_x_off)
             self._screen_play_x = None
         try:
             self._last_time_ms = pygame.time.get_ticks()
@@ -439,7 +474,7 @@ class SheetMusicRenderer:
                 view_w, x_off = self._compute_view_and_xoff()
             except (AttributeError, TypeError, ValueError):
                 view_w = self.screen_width
-                x_off = int(round(self._view_x_off)) if hasattr(self, '_view_x_off') else 0
+                x_off = int(round(self.view_x_off)) if hasattr(self, 'view_x_off') else 0
 
             if animate:
                 self._init_screen_play_x(view_w, x_off)
@@ -455,7 +490,7 @@ class SheetMusicRenderer:
                     pass
                 return
             else:
-                self._view_x_off = float(self._target_x_off)
+                self.view_x_off = float(self._target_x_off)
                 self._screen_play_x = None
                 try:
                     self._last_time_ms = pygame.time.get_ticks()

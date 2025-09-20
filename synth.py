@@ -30,7 +30,7 @@ class Synth:
         self.fs.program_select(0, self.sfid, 0, 0)
 
     def play_measure(self, measure_index, midi_teacher):
-        chords, times, _ = midi_teacher.get_notes_for_measure(measure_index)
+        chords, times, _, _ = midi_teacher.get_notes_for_measure(measure_index)
         if not chords:
             return
         

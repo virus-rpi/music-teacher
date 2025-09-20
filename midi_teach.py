@@ -167,18 +167,20 @@ class MidiTeacher:
         self.measures = []
         current_chord_idx = 0
 
-        for measure_svg_data in measure_data:
-            count = len(measure_svg_data) if measure_svg_data else 0
-            if count == 0:
-                self.measures.append(([], [], []))
+        for measure_info in measure_data:
+            if measure_info is None or len(measure_info) != 3:
+                self.measures.append(([], [], [], (None, None)))
                 continue
-
+            start_x, end_x, n_notes = measure_info
+            count = int(n_notes) if n_notes is not None else 0
+            if count == 0:
+                self.measures.append(([], [], [], (start_x, end_x)))
+                continue
             end_idx = min(current_chord_idx + count, len(self.chords))
             measure_chords = self.chords[current_chord_idx:end_idx]
-            measure_chord_times = self.chord_times[current_chord_idx:end_idx]
+            measure_chord_times = [measure_time - self.chord_times[current_chord_idx:end_idx][0] for measure_time in self.chord_times[current_chord_idx:end_idx]]
             measure_note_xs = notehead_xs[current_chord_idx:end_idx] if notehead_xs else []
-
-            self.measures.append((measure_chords, measure_chord_times, measure_note_xs))
+            self.measures.append((measure_chords, measure_chord_times, measure_note_xs, (start_x, end_x)))
             current_chord_idx = end_idx
 
     def get_notes_for_measure(self, measure_index):
