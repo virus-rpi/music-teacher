@@ -135,7 +135,7 @@ def draw_progress_bar(surface, progress, dims):
     text_rect = text.get_rect(center=(screen_width // 2, y + bar_height // 2))
     surface.blit(text, text_rect)
 
-def draw_ui_overlay(screen, midi_teacher, dims, font_small=None, font_medium=None, alpha=1.0):
+def draw_ui_overlay(screen, midi_teacher, dims, guided_teacher, font_small=None, font_medium=None, alpha=1.0):
     """Draw the top UI overlay: progress bar, loop markers, status and instructions.
     Draw everything onto an overlay surface, apply the requested alpha, then blit to the screen.
     """
@@ -173,22 +173,34 @@ def draw_ui_overlay(screen, midi_teacher, dims, font_small=None, font_medium=Non
 
     margin = 16
 
-    status = f"Chord {cur}/{total}   Loop: {'ON' if loop_enabled else 'OFF'}"
+    status = f"Chord {cur}/{total}   Loop: {'ON' if loop_enabled else 'OFF'}" if not guided_teacher.is_active else f"Chord {cur}/{total}   Auto-Advance: {'ON' if guided_teacher.auto_advance else 'OFF'}"
     txt = font_medium.render(status, True, (220, 220, 220))
     txt_w, txt_h = txt.get_size()
     status_y = max(margin, screen_height - margin - txt_h*4)
     overlay.blit(txt, (margin, status_y))
 
-    instr_lines = [
-        "Click progress bar to seek.",
-        "<- / -> : step by 1 chord. Shift for 10, Ctrl for 5.",
-        ", : set loop start at current. . : set loop end at current. L : toggle loop.",
-        "T : toggle teaching mode. D : debug advance. S : toggle synth."
+    if guided_teacher.is_active:
+        instr_lines = [
+            "Press R to replay the current measure.",
+            "Press SPACE to play the section notes.",
+            "Press ENTER to advance to the next task.",
+            "Press SHIFT+ENTER to go back to the previous task.",
+            "Press A to toggle auto-advance."
+        ]
+    else:
+        instr_lines = [
+            "Click progress bar to seek.",
+            "<- / -> : step by 1 chord. Shift for 10, Ctrl for 5.",
+            ", : set loop start at current. . : set loop end at current. L : toggle loop.",
+        ]
+    instr_lines += [
+        "T : toggle teaching mode. G: toggle guidance mode. D : debug advance. S : toggle synth."
     ]
+
     line_h = font_small.get_height()
     padding_between = 4
-    total_h = len(instr_lines) * (line_h + padding_between)
-    instr_top = max(margin, screen_height - margin - total_h*1.8)
+    total_h = (len(instr_lines)+1) * (line_h + padding_between)
+    instr_top = screen_height - margin - total_h - txt_h * 2
     for i, line in enumerate(instr_lines):
         it = font_small.render(line, True, (180, 180, 180))
         iw, ih = it.get_size()

@@ -97,8 +97,8 @@ def render():
     dims['PEDAL_Y'] = int(piano_y_current + WHITE_KEY_HEIGHT + 30)
     draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims,
                midi_teacher.get_next_notes() if teaching_mode else set())
-    draw_ui_overlay(screen, midi_teacher, dims, font_small, font_medium, alpha=overlay_alpha_current)
-    if guided_mode:
+    draw_ui_overlay(screen, midi_teacher, dims, guided_teacher, font_small, font_medium, alpha=overlay_alpha_current)
+    if guided_mode and teaching_mode:
         draw_guided_mode_overlay(screen, guided_teacher, sheet_music_renderer, dims)
     sheet_music_renderer.draw(screen, dims.get('SHEET_Y', 0), midi_teacher.get_progress(), guided_teacher, sheet_alpha_current)
 
@@ -161,7 +161,7 @@ midi_thread.start()
 running = True
 while running:
     events = pygame.event.get()
-    if guided_mode:
+    if guided_mode and teaching_mode:
         guided_teacher.update(pressed_notes_set, pressed_note_events, events)
     for event in events:
         if event.type == pygame.QUIT or (
