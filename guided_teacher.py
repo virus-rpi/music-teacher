@@ -283,6 +283,7 @@ class GuidedTeacher:
         self.tasks.append(PracticeMeasureTask(self, measure_index))
         if measure_index + 1 < len(self.midi_teacher.measures):
             self.tasks.append(PracticeTransitionTask(self, measure_index, measure_index + 1))
+            # TODO: if its the last one let the use play the whole song and evaluate it and based on the evaluation add more tasks to practice specific areas
         self.tasks.append(GenerateNextMeasureTasks(self))
 
     def next_task(self):
