@@ -27,6 +27,7 @@ A real-time MIDI piano visualizer and teaching tool for Linux, designed for use 
 - **Settings UI**: Customize the constants from a settings UI.
 - **Progress Persistence**: Save and load progress made in the guided mode.
 - **Hand placement hints**: Add an algorithm to calculate the optimal hand placement for comfort and ease of switching between cords.
+- **Improved Sheet Music Rendering**: Remove duplicate clefs and make sure the height stays consistent.
 
 ## Usage
 
