@@ -126,7 +126,10 @@ class PracticeSectionTask(Task):
 
     def _handle_midi_events(self, pressed_notes: set[int], pressed_note_events):
         if len(self.recording) == 0 and len(pressed_note_events) > 0:
-            earliest = min(ev.time for ev in pressed_note_events if hasattr(ev, 'time'))
+            times = [ev.time for ev in pressed_note_events if hasattr(ev, 'time') and ev.note in [n[0] for n in self.section.chords[0]]]
+            if not times:
+                return
+            earliest = min(times)
             self.timer_start = earliest
 
         if self._last_record_time is None and self.timer_start is not None:
