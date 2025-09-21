@@ -1,7 +1,7 @@
 # MIDI Piano Visualizer & Teacher
 
 A real-time MIDI piano visualizer and teaching tool, designed for use with a MIDI keyboard and SoundFont synthesizer. This application displays a virtual piano, sheet music, and interactive overlays to help users learn and practice piano pieces from MIDI files.
-This is still a work in progress and use may need some tinkering. 
+This is still a work in progress and use may need some tinkering.  
 Help is appreciated!
 
 ## Features
@@ -24,12 +24,14 @@ Help is appreciated!
 - **Play**: Play the current measure or section to see how it sounds.
 - **Section Navigation**: Navigate to the next or previous section with keyboard shortcuts.
 
-## Planned Features
+## Planned Features (may not all be implemented)
 - **Co-Pianist Mode**: Let it play the other hand or two other hands for you to practice or play songs that require more than two hands.
 - **Settings UI**: Customize the constants from a settings UI.
 - **Progress Persistence**: Save and load progress made in the guided mode.
 - **Hand placement hints**: Add an algorithm to calculate the optimal hand placement for comfort and ease of switching between cords.
 - **Improved Sheet Music Rendering**: Remove duplicate clefs and make sure the height stays consistent.
+- **Visual Feedback For Mistakes**: Show wrong notes and wrong timings in relation to how it should be, so it's easier to understand what to change.
+- **More Tips**: Add more tips for improving your score, including techniques for how to play certain things better (e.g. how to play fast consecutive notes)
 
 ## Usage
 
