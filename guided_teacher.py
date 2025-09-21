@@ -173,6 +173,7 @@ class PracticeSectionTask(Task):
         self.teacher.last_score = score.overall
         print(f"Eval: accuracy={score.accuracy:.3f} rel={score.relative_timing:.3f} abs={score.absolute_timing:.3f} -> score={score.overall:.3f}")
         if score.overall > 0.95 and self.teacher.auto_advance:
+            self.teacher.synth.play_success_sound()
             self.teacher.next_task()
             self.teacher.guide_text = "Great! " + guidance_text
         else:

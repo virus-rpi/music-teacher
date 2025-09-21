@@ -32,6 +32,15 @@ class Synth:
         self.fs.noteon(9, 71, 127)
         self.fs.program_select(0, self.sfid, 0, 0)
 
+    def play_success_sound(self):
+        self.fs.program_select(0, self.sfid, 0, 8)  # channel 0, bank 0, program 8 (Celesta)
+        notes = [72, 76, 79]
+        for i, note in enumerate(notes):
+            self.fs.noteon(0, note, 120)
+            time.sleep(0.01)
+            self.fs.noteoff(0, note)
+        self.fs.program_select(0, self.sfid, 0, 0)  # Restore to piano
+
     def play_measure(self, measure_index, midi_teacher, set_index_callback=None, reset_to_index=None):
         chords, times, _, _, (start_index, _) = midi_teacher.get_notes_for_measure(measure_index)
         
