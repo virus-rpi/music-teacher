@@ -1,14 +1,17 @@
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 import mido
 import pygame
 from evaluator import Evaluator
 from midi_teach import MidiTeacher
 from synth import Synth
 from abc import ABC, abstractmethod
+import json
+import os
 
 CHORDS_PER_SECTION = (3, 4)
+STATE_FILE = 'guided_teacher_state.json'
 
 @dataclass(frozen=True)
 class MeasureSection:
@@ -171,6 +174,15 @@ class PracticeSectionTask(Task):
         guidance_text = evaluator.generate_guidance(score)
 
         self.teacher.last_score = score.overall
+        idx = getattr(self, 'measure', None)
+        if idx is not None:
+            hist = self.teacher.evaluator_history.setdefault(idx, {'scores': [], 'best_score': 0.0, 'analytics': [], 'recording': None})
+            hist['scores'].append(score.overall)
+            hist['best_score'] = max(hist['best_score'], score.overall)
+            hist['analytics'].append(getattr(evaluator, 'analytics', {}))
+            hist['recording'] = self.recording.copy()
+            self.teacher.save_state()
+
         print(f"Eval: accuracy={score.accuracy:.3f} rel={score.relative_timing:.3f} abs={score.absolute_timing:.3f} -> score={score.overall:.3f}")
         if score.overall > 0.95 and self.teacher.auto_advance:
             self.teacher.synth.play_success_sound()
@@ -240,6 +252,9 @@ class GuidedTeacher:
         self.last_score = 0.0
         self.guide_text = None
         self._loop_info_before = None
+        self.evaluator_history = {}
+        self._state_file = STATE_FILE
+        self.load_state()
 
     def get_last_score(self):
         return self.last_score
@@ -250,11 +265,14 @@ class GuidedTeacher:
     def start(self):
         self.is_active = True
         self._loop_info_before = (self.midi_teacher.loop_enabled, self.midi_teacher.loop_start, self.midi_teacher.loop_end)
-        self.current_measure_index = 0
-        self.generate_tasks_for_measure(self.current_measure_index)
+        self.load_state()
+        if not self.tasks and not self.current_task:
+            self.current_measure_index = 0
+            self.generate_tasks_for_measure(self.current_measure_index)
 
     def stop(self):
         self.is_active = False
+        self.save_state()
         self.tasks.clear()
         self.history.clear()
         self.current_task = None
@@ -276,6 +294,7 @@ class GuidedTeacher:
                 elif event.key == pygame.K_a:
                     self.auto_advance = not self.auto_advance
                     print(f"Auto advance: {self.auto_advance}")
+        self.save_state()
 
     def generate_tasks_for_measure(self, measure_index):
         self.tasks.clear()
@@ -289,6 +308,7 @@ class GuidedTeacher:
             self.tasks.append(PracticeTransitionTask(self, measure_index, measure_index + 1))
             # TODO: if its the last one let the use play the whole song and evaluate it and based on the evaluation add more tasks to practice specific areas
         self.tasks.append(GenerateNextMeasureTasks(self))
+        self.save_state()
 
     def next_task(self):
         if self.current_task:
@@ -301,6 +321,7 @@ class GuidedTeacher:
         else:
             self.current_task = None
             self.stop()
+        self.save_state()
 
     def previous_task(self):
         if self.history:
@@ -309,6 +330,7 @@ class GuidedTeacher:
                 self.tasks.insert(0, self.current_task)
             self.current_task = self.history.pop()
             self.current_task.on_start()
+        self.save_state()
 
     def split_measure_into_sections(self, measure_index):
         measure_chords, measure_times, measure_xs, _, (measure_start_index, _) = self.midi_teacher.get_notes_for_measure(measure_index)
@@ -344,5 +366,78 @@ class GuidedTeacher:
             i += max_chords - 1  # overlap 1
         return sections
 
-    def get_current_task_info(self):
-        return self.current_task
+    def to_dict(self):
+        def task_to_dict(task):
+            if task is None:
+                return None
+            section = getattr(task, 'section', None)
+            if section is not None and isinstance(section, MeasureSection):
+                section = asdict(section)
+            return {
+                'type': type(task).__name__,
+                'measure': getattr(task, 'measure', None),
+                'section': section,
+                'start_idx': getattr(task, 'start_idx', None),
+                'end_idx': getattr(task, 'end_idx', None),
+            }
+        tasks_list = list(self.tasks)
+        if self.current_task is not None:
+            tasks_list = [self.current_task] + tasks_list
+        return {
+            'current_measure_index': self.current_measure_index,
+            'auto_advance': self.auto_advance,
+            'tasks': [task_to_dict(t) for t in tasks_list],
+            'history': [task_to_dict(t) for t in self.history],
+            'current_task': None,
+            'last_score': self.last_score,
+            'guide_text': self.guide_text,
+            'evaluator_history': self.evaluator_history,
+        }
+
+    def from_dict(self, d):
+        def dict_to_task(td):
+            if td is None:
+                return None
+            ttype = td.get('type')
+            measure = td.get('measure')
+            section = td.get('section')
+            if ttype == 'PlaybackMeasureTask':
+                return PlaybackMeasureTask(self, measure)
+            elif ttype == 'PracticeSectionTask':
+                # Reconstruct section if possible
+                if section and isinstance(section, dict):
+                    sec = MeasureSection(**section)
+                else:
+                    sec = None
+                return PracticeSectionTask(self, sec, measure)
+            elif ttype == 'PracticeMeasureTask':
+                return PracticeMeasureTask(self, measure)
+            elif ttype == 'PracticeTransitionTask':
+                return PracticeTransitionTask(self, measure, measure+1)
+            elif ttype == 'GenerateNextMeasureTasks':
+                return GenerateNextMeasureTasks(self)
+            return None
+        self.current_measure_index = d.get('current_measure_index', 0)
+        self.auto_advance = d.get('auto_advance', True)
+        self.tasks = deque([dict_to_task(td) for td in d.get('tasks', []) if td])
+        self.history = [dict_to_task(td) for td in d.get('history', []) if td]
+        self.current_task = dict_to_task(d.get('current_task'))
+        self.last_score = d.get('last_score', 0.0)
+        self.guide_text = d.get('guide_text', None)
+        self.evaluator_history = d.get('evaluator_history', {})
+
+    def save_state(self):
+        try:
+            with open(self._state_file, 'w') as f:
+                json.dump(self.to_dict(), f, indent=2, default=str)
+        except Exception as e:
+            print(f"Failed to save state: {e}")
+
+    def load_state(self):
+        if os.path.exists(self._state_file):
+            try:
+                with open(self._state_file, 'r') as f:
+                    d = json.load(f)
+                self.from_dict(d)
+            except Exception as e:
+                print(f"Failed to load state: {e}")
