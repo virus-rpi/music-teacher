@@ -168,26 +168,15 @@ class AnalyticsPopup:
         ])
         self.section_dropdown_rect = section_bg
         curr_x += section_dropdown_w + 10
-        # Dropdown options if open
         self.measure_option_rects = []
         self.section_option_rects = []
         if self.dropdown_open == 'measure':
             for i, m in enumerate(self.measure_list):
-                opt_label = f"Measure {m}"
-                opt_surf = self.font.render(opt_label, True, (255,255,255))
                 opt_bg = pygame.Rect(self.measure_dropdown_rect.x, self.measure_dropdown_rect.bottom + i*dropdown_h, self.measure_dropdown_rect.width, dropdown_h)
-                pygame.draw.rect(surface, (40,40,40), opt_bg, border_radius=6)
-                pygame.draw.rect(surface, (80,80,80), opt_bg, 2, border_radius=6)
-                surface.blit(opt_surf, (opt_bg.x+16, opt_bg.y + (dropdown_h - opt_surf.get_height())//2))
                 self.measure_option_rects.append(opt_bg)
         if self.dropdown_open == 'section':
             for i, key in enumerate(section_keys):
-                opt_label = f"Section {i+1}"
-                opt_surf = self.font.render(opt_label, True, (255,255,255))
                 opt_bg = pygame.Rect(self.section_dropdown_rect.x, self.section_dropdown_rect.bottom + i*dropdown_h, self.section_dropdown_rect.width, dropdown_h)
-                pygame.draw.rect(surface, (40,40,40), opt_bg, border_radius=6)
-                pygame.draw.rect(surface, (80,80,80), opt_bg, 2, border_radius=6)
-                surface.blit(opt_surf, (opt_bg.x+16, opt_bg.y + (dropdown_h - opt_surf.get_height())//2))
                 self.section_option_rects.append(opt_bg)
         curr_y += title_h + 10
         analytics = self._get_selected_analytics()
@@ -196,7 +185,6 @@ class AnalyticsPopup:
             score_txt = self.font.render(f"Overall Score: {overall*100:.1f}%", True, (255,255,255))
             surface.blit(score_txt, (left_x, curr_y))
             curr_y += score_txt.get_height() + int(self.height * 0.01)
-        # Score breakdown bar chart (30% of available height)
         bar_h = int(content_h * 0.3)
         bar_chart_surf = self._matplotlib_bar_chart(analytics=analytics, width=content_w, height=bar_h)
         surface.blit(bar_chart_surf, (left_x, curr_y))
@@ -219,6 +207,8 @@ class AnalyticsPopup:
         # Close hint
         hint = self.small_font.render('Press TAB to close', True, (255, 255, 255))
         surface.blit(hint, (x + self.width - pad_side - 200, y + self.height - pad_top - 40))
+        # Draw dropdowns last so they are above the rest
+        self._draw_dropdowns(surface)
 
     def _draw_explanations(self, surface, x, y):
         explanations = [
@@ -284,17 +274,17 @@ class AnalyticsPopup:
         values = np.append(values, values[0])  # close the loop
         angles = np.linspace(0, 2 * np.pi, len(labels), endpoint=False)
         angles = np.append(angles, angles[0])
-        fig = plt.figure(figsize=(width/100, height/100), dpi=100)
+        fig = plt.figure(figsize=(width / 100, height / 100), dpi=100)
         ax = fig.add_subplot(111, polar=True)
         ax.plot(angles, values, 'o-', linewidth=2, color='#50c878')
         ax.fill(angles, values, alpha=0.25, color='#50c878')
-        ax.set_thetagrids(angles[:-1] * 180/np.pi, labels, color='white')
+        ax.set_thetagrids(angles[:-1] * 180 / np.pi, labels, color='white')
         ax.set_ylim(0, 1)
         ax.set_title('Radar (Spider) Graph', y=1.1, color='white')
         ax.grid(True, color='white', alpha=0.3)
         ax.tick_params(colors='white')
         fig.patch.set_alpha(0)
-        ax.set_facecolor((0,0,0,0))
+        ax.set_facecolor((0, 0, 0, 0))
         plt.tight_layout()
         buf = io.BytesIO()
         plt.savefig(buf, format='png', transparent=True)
@@ -314,21 +304,21 @@ class AnalyticsPopup:
         if analytics.get('worst_interval_idx') is not None:
             idx = analytics['worst_interval_idx'] + 1
             diff = analytics['worst_interval_diff']
-            tips.append(f'Largest timing gap error between onsets {idx} and {idx+1}: {diff:.2f}')
+            tips.append(f'Largest timing gap error between onsets {idx} and {idx + 1}: {diff:.2f}')
         if analytics.get('tempo_bias') is not None:
             bias = analytics['tempo_bias']
             if abs(bias) > 0.02:
-                tips.append(f'Overall tempo was {"faster" if bias>0 else "slower"} by {abs(bias)*100:.1f}%')
+                tips.append(f'Overall tempo was {"faster" if bias > 0 else "slower"} by {abs(bias) * 100:.1f}%')
         if analytics.get('legato_detected'):
             sev = analytics.get('legato_severity', 0)
-            tips.append(f'Legato severity {sev*100:.1f}% (lower is better)')
+            tips.append(f'Legato severity {sev * 100:.1f}% (lower is better)')
         if not tips:
             tips = ['No major issues detected.']
         line_h = self.small_font.get_height() + 2
         max_lines = max_height // line_h
         for i, tip in enumerate(tips[:max_lines]):
             tiptxt = self.small_font.render(tip, True, (255, 255, 255))
-            surface.blit(tiptxt, (x, y + i*line_h))
+            surface.blit(tiptxt, (x, y + i * line_h))
 
     def _draw_per_chord(self, surface, x, y, analytics, width=400, height=60):
         per = analytics.get('per_chord', []) if analytics else []
@@ -345,19 +335,45 @@ class AnalyticsPopup:
             bx = x + i * (ref_bar_w + 2)
             by = y
             ref_rect = pygame.Rect(bx, by, ref_bar_w, ref_bar_h)
-            pygame.draw.rect(surface, (180,180,180), ref_rect)
+            pygame.draw.rect(surface, (180, 180, 180), ref_rect)
         for i, info in enumerate(per):
             acc = info.get('score', 0)
             timing = timing_accuracies[i] if i < len(timing_accuracies) else 1.0
             bar_h = int(acc * ref_bar_h)
             bar_w = int(ref_bar_w * timing)
-            bx = x + i * (ref_bar_w + 2) + (ref_bar_w - bar_w)//2
+            bx = x + i * (ref_bar_w + 2) + (ref_bar_w - bar_w) // 2
             by = y + ref_bar_h - bar_h
             user_surf = pygame.Surface((bar_w, bar_h), pygame.SRCALPHA)
-            color = (80,200,120, 50) if acc > 0.8 else (255,120,120, 50)
+            color = (80, 200, 120, 50) if acc > 0.8 else (255, 120, 120, 50)
             user_surf.fill(color)
             surface.blit(user_surf, (bx, by))
-            idx_txt = self.small_font.render(str(i+1), True, (255,255,255))
-            surface.blit(idx_txt, (x + i * (ref_bar_w + 2) + 2, y+ref_bar_h+4))
-        label = self.small_font.render('Per-chord accuracy (height=accuracy, width=timing)', True, (255,255,255))
-        surface.blit(label, (x, y+ref_bar_h+24))
+            idx_txt = self.small_font.render(str(i + 1), True, (255, 255, 255))
+            surface.blit(idx_txt, (x + i * (ref_bar_w + 2) + 2, y + ref_bar_h + 4))
+        label = self.small_font.render('Per-chord accuracy (height=accuracy, width=timing)', True, (255, 255, 255))
+        surface.blit(label, (x, y + ref_bar_h + 24))
+
+    def _draw_dropdowns(self, surface):
+        if not self.visible:
+            return
+        if self.font is None:
+            self.font = pygame.font.SysFont('Arial', 22)
+        dropdown_h = self.measure_dropdown_rect.height if hasattr(self, 'measure_dropdown_rect') else 32
+        if self.dropdown_open == 'measure' and hasattr(self, 'measure_option_rects'):
+            for i, m in enumerate(self.measure_list):
+                opt_label = f"Measure {m}"
+                opt_surf = self.font.render(opt_label, True, (255,255,255))
+                opt_bg = self.measure_option_rects[i]
+                pygame.draw.rect(surface, (40,40,40), opt_bg, border_radius=6)
+                pygame.draw.rect(surface, (80,80,80), opt_bg, 2, border_radius=6)
+                surface.blit(opt_surf, (opt_bg.x+16, opt_bg.y + (dropdown_h - opt_surf.get_height())//2))
+        # Draw section dropdown options
+        if self.dropdown_open == 'section' and hasattr(self, 'section_option_rects'):
+            measure = self.measure_list[self.selected_measure_idx] if self.measure_list else '—'
+            section_keys = self.section_dict[measure] if self.measure_list else []
+            for i, key in enumerate(section_keys):
+                opt_label = f"Section {i+1}"
+                opt_surf = self.font.render(opt_label, True, (255,255,255))
+                opt_bg = self.section_option_rects[i]
+                pygame.draw.rect(surface, (40,40,40), opt_bg, border_radius=6)
+                pygame.draw.rect(surface, (80,80,80), opt_bg, 2, border_radius=6)
+                surface.blit(opt_surf, (opt_bg.x+16, opt_bg.y + (dropdown_h - opt_surf.get_height())//2))
