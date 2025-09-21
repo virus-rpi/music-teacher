@@ -36,13 +36,48 @@ class Evaluator:
             self._score = self._evaluate()
         return self._score
 
+    def _detect_legato(self, note_events):
+        """Detect legato playing by finding overlapping note_on and note_off events."""
+        active_notes = {}  # note -> start_time
+        legato_detected = False
+
+        for time, note, event_type in note_events:
+            if event_type == 'on':
+                if note in active_notes:
+                    legato_detected = True
+                active_notes[note] = time
+            elif event_type == 'off':
+                if note in active_notes:
+                    del active_notes[note]
+
+        return legato_detected
+
+    def _is_chord_legato(self, chord_index, recorded_onsets, legato_detected):
+        """Determine if a specific chord has legato issues."""
+        if not legato_detected or chord_index >= len(self.section.chords):
+            return False
+        if chord_index < len(recorded_onsets):
+            chord_notes = set(n for n, _hand in self.section.chords[chord_index])
+            recorded_notes = recorded_onsets[chord_index][1]
+            if len(recorded_notes) > len(chord_notes):
+                return True
+                
+        return False
+
     def _evaluate(self) -> Score:
         events = []
+        note_events = []
         abs_ms = 0
         for msg in self.recording:
             abs_ms += getattr(msg, 'time', 0)
             if msg.type == 'note_on' and getattr(msg, 'velocity', 0) > 0:
                 events.append((abs_ms, msg.note))
+                note_events.append((abs_ms, msg.note, 'on'))
+            elif msg.type == 'note_off' or (msg.type == 'note_on' and getattr(msg, 'velocity', 0) == 0):
+                note_events.append((abs_ms, msg.note, 'off'))
+
+        legato_detected = self._detect_legato(note_events)
+        
         threshold_ms = 50
         recorded_onsets = []
         for t, note in events:
@@ -53,7 +88,7 @@ class Evaluator:
         recorded_onsets = [(o[0], o[1]) for o in recorded_onsets]
 
         if not self.section.chords:
-            self.analytics = {'reason': 'no_chords'}
+            self.analytics = {'reason': 'no_chords', 'legato_detected': legato_detected}
             return Score(1.0, 1.0, 1.0, 1.0)
 
         chord_indices = list(range(self.start_idx, self.end_idx + 1))
@@ -101,7 +136,7 @@ class Evaluator:
         ref_chords = [set(n for n, _hand in chord) for chord in self.section.chords]
 
         if not recorded_onsets:
-            self.analytics = {'reason': 'no_recording'}
+            self.analytics = {'reason': 'no_recording', 'legato_detected': legato_detected}
             return Score(0.0, 0.0, 0.0, 0.0)
 
         n_ref = len(ref_onsets_ms)
@@ -109,26 +144,39 @@ class Evaluator:
         m = min(n_ref, n_rec)
 
         acc_scores = []
-        per_chord_issues = []  # list of dicts with missed/extra/score
+        per_chord_issues = []
+        legato_issues = []
+        
         for i in range(m):
             ref_set = ref_chords[i]
             rec_set = recorded_onsets[i][1]
             if not ref_set and not rec_set:
                 acc_scores.append(1.0)
                 per_chord_issues.append({'missed': set(), 'extra': set(), 'score': 1.0})
+                legato_issues.append(False)
                 continue
+
+            chord_legato = self._is_chord_legato(i, recorded_onsets, legato_detected)
+            legato_issues.append(chord_legato)
+
             inter = len(ref_set & rec_set)
             denom = (len(ref_set) + len(rec_set))
             if denom == 0:
                 s = 1.0
             else:
                 s = (2.0 * inter) / denom
+                if chord_legato and len(ref_set & rec_set) == len(ref_set):
+                    s = max(s, 0.8)
+            
             acc_scores.append(s)
             per_chord_issues.append({'missed': (ref_set - rec_set), 'extra': (rec_set - ref_set), 'score': s})
+            
         if n_rec < n_ref:
             acc_scores.extend([0.0] * (n_ref - n_rec))
             for i in range(n_rec, n_ref):
                 per_chord_issues.append({'missed': ref_chords[i], 'extra': set(), 'score': 0.0})
+                legato_issues.append(False)
+                
         accuracy_score = sum(acc_scores) / max(1, n_ref)
 
         def intervals(xs):
@@ -164,8 +212,6 @@ class Evaluator:
         score = (WEIGHTS['accuracy'] * accuracy_score) + (WEIGHTS['relative'] * relative_score) + (WEIGHTS['absolute'] * absolute_score)
         score = max(0.0, min(1.0, score))
 
-        # collect analytics to help generate guidance
-        # find worst chord by accuracy
         worst_idx = None
         worst_score = 1.0
         for i, info in enumerate(per_chord_issues):
@@ -183,6 +229,8 @@ class Evaluator:
         if ref_total > 0 and m > 1:
             tempo_bias = float(rec_total - ref_total) / float(ref_total)
 
+        legato_severity = sum(legato_issues) / max(1, len(legato_issues)) if legato_issues else 0.0
+
         analytics = {
             'accuracy': accuracy_score,
             'per_chord': per_chord_issues,
@@ -198,6 +246,9 @@ class Evaluator:
             'n_rec': n_rec,
             'ref_onsets_ms': ref_onsets_ms,
             'rec_onsets_ms': [t for t, _ in recorded_onsets[:m]],
+            'legato_detected': legato_detected,
+            'legato_issues': legato_issues,
+            'legato_severity': legato_severity,
         }
 
         self.analytics = analytics
@@ -213,17 +264,20 @@ class Evaluator:
 
     def generate_guidance(self, score: Score) -> str:
         """Generate a short human-friendly guidance message based on the last evaluation analytics.
-        The method prefers the single largest-impact problem (accuracy, relative timing, absolute timing).
+        The method prefers the single largest-impact problem (accuracy, relative timing, absolute timing, legato).
         """
         if not self.analytics:
             return "No guidance available."
 
-        # compute component impacts (how much they reduced the overall score)
+        legato_severity = self.analytics.get('legato_severity', 0.0)
+        legato_detected = self.analytics.get('legato_detected', False)
+
         acc_impact = WEIGHTS['accuracy'] * (1.0 - self.analytics.get('accuracy', 1.0))
         rel_impact = WEIGHTS['relative'] * (1.0 - self.analytics.get('relative', 1.0))
         abs_impact = WEIGHTS['absolute'] * (1.0 - self.analytics.get('absolute', 1.0))
+        legato_impact = legato_severity * 0.3
 
-        impacts = [('accuracy', acc_impact), ('relative', rel_impact), ('absolute', abs_impact)]
+        impacts = [('accuracy', acc_impact), ('relative', rel_impact), ('absolute', abs_impact), ('legato', legato_impact)]
         impacts.sort(key=lambda x: x[1], reverse=True)
         primary = impacts[0][0]
 
@@ -236,6 +290,8 @@ class Evaluator:
             return "Machine Perfect! Keep it up! But don't forget to play with feeling."
 
         if score.overall >= 0.98:
+            if legato_detected and legato_severity > 0.1:
+                return "Almost perfect! Try releasing notes cleanly between chords for better articulation."
             if tempo_bias is not None and abs(tempo_bias) > 0.02:
                 if tempo_bias > 0:
                     return "Almost perfect! Now play a little faster overall."
@@ -246,7 +302,18 @@ class Evaluator:
         if self.analytics.get('n_rec', 0) == 0:
             return "I didn't detect any notes. Try playing the section more clearly or check your MIDI input."
 
+        if primary == 'legato' and legato_detected:
+            if legato_severity > 0.7:
+                return "You're playing too legato (connected) — try releasing notes cleanly between chords for better separation."
+            elif legato_severity > 0.4:
+                return "Some notes are connecting when they should be separate — focus on clean note releases between chords."
+            else:
+                return "Work on articulation — make sure notes don't overlap between different chords."
+
         if primary == 'accuracy':
+            if legato_detected and legato_severity > 0.3:
+                return "You're playing the right notes but they're connecting too much — focus on clean separation between chords."
+            
             if worst_chord_idx is None:
                 return "Focus on pressing the right keys."
             info = per_chord[worst_chord_idx]
@@ -258,12 +325,18 @@ class Evaluator:
                 return f"Focus on pressing the right keys at the {self._ordinal(human_idx)} chord (you missed: {notes})."
             if extra and not missed:
                 notes = ','.join(str(n) for n in sorted(extra))
+                # Check if the extra notes might be from legato
+                if legato_detected:
+                    return f"Release notes cleanly at the {self._ordinal(human_idx)} chord — some notes from previous chords are still sounding."
                 return f"Avoid extra keys at the {self._ordinal(human_idx)} chord (extra: {notes})."
             if missed and extra:
                 return f"At the {self._ordinal(human_idx)} chord you both missed some notes and played extras — practice that chord slowly."
             return "Focus on pressing the right keys consistently. Try playing slower and cleanly."
 
         if primary == 'relative':
+            if legato_detected and legato_severity > 0.3:
+                return "Your note timing is affected by legato playing — try cleaner note releases for better rhythm."
+            
             if worst_interval_idx is None:
                 return "Work on keeping consistent spacing between notes. Practice slowly with a metronome."
             a = worst_interval_idx + 1
@@ -292,4 +365,7 @@ class Evaluator:
                     return "Almost perfect! Now just play it a little slower overall."
                 return f"Play the whole section slower by about {int(pct)}% to match the target tempo."
 
+        if legato_detected and legato_severity > 0.2:
+            return "Keep practicing — focus on clean note releases and avoid connecting notes between different chords."
+        
         return "Keep practicing — try slowing down and focusing on accuracy and steady timing."

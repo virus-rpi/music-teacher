@@ -142,6 +142,7 @@ class PracticeSectionTask(Task):
         self._prev_pressed_notes = current
 
     def _handle_evaluate(self):
+        print(self.recording)
         evaluator = Evaluator(self)
         score = evaluator.score
 
