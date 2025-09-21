@@ -175,8 +175,10 @@ class PracticeSectionTask(Task):
 
         self.teacher.last_score = score.overall
         idx = getattr(self, 'measure', None)
-        if idx is not None:
-            hist = self.teacher.evaluator_history.setdefault(idx, {'scores': [], 'best_score': 0.0, 'analytics': [], 'recording': None})
+        section = getattr(self, 'section', None)
+        if idx is not None and section is not None:
+            section_key = f"{idx}_{section.start_idx}_{section.end_idx}"
+            hist = self.teacher.evaluator_history.setdefault(section_key, {'scores': [], 'best_score': 0.0, 'analytics': [], 'recording': None})
             hist['scores'].append(score.overall)
             hist['best_score'] = max(hist['best_score'], score.overall)
             hist['analytics'].append(getattr(evaluator, 'analytics', {}))
@@ -404,7 +406,6 @@ class GuidedTeacher:
             if ttype == 'PlaybackMeasureTask':
                 return PlaybackMeasureTask(self, measure)
             elif ttype == 'PracticeSectionTask':
-                # Reconstruct section if possible
                 if section and isinstance(section, dict):
                     sec = MeasureSection(**section)
                 else:

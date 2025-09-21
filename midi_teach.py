@@ -19,12 +19,21 @@ class MidiTeacher:
     def _extract_chords(self):
         mid = mido.MidiFile(self.midi_path)
         events = []
+        note_on_times = {}
+        note_durations = []
         for track_idx, track in enumerate(mid.tracks):
             abs_time = 0
             for msg in track:
                 abs_time += msg.time
                 if msg.type == 'note_on' and getattr(msg, 'velocity', 0) > 0:
                     events.append((abs_time, msg.note, track_idx))
+                    note_on_times[(msg.note, track_idx, abs_time)] = abs_time
+                elif (msg.type == 'note_off') or (msg.type == 'note_on' and getattr(msg, 'velocity', 0) == 0):
+                    candidates = [(k, v) for k, v in note_on_times.items() if k[0] == msg.note and k[1] == track_idx]
+                    if candidates:
+                        (note, t_idx, onset_tick), _ = max(candidates, key=lambda x: x[1])
+                        note_durations.append((msg.note, track_idx, onset_tick, abs_time))
+                        del note_on_times[(note, t_idx, onset_tick)]
         events.sort()
         chords_dict = {}
         for t, note, track_idx in events:
@@ -40,11 +49,23 @@ class MidiTeacher:
             hand_map = {sorted_tracks[0]: 'R', sorted_tracks[1]: 'L'}
         chords = []
         times = []
+        chords_with_durations = []
         for t in sorted_times:
             notes = chords_dict[t]
             chord = [(note, hand_map.get(track_idx, 'R')) for note, track_idx in notes]
             chords.append(chord)
             times.append(t)
+            chord_notes_with_durations = []
+            for note, track_idx in notes:
+                match = next(((n, hand_map.get(track_idx, 'R'), onset, offset)
+                              for n, t_idx, onset, offset in note_durations
+                              if n == note and t_idx == track_idx and onset == t), None)
+                if match:
+                    chord_notes_with_durations.append(match)
+                else:
+                    chord_notes_with_durations.append((note, hand_map.get(track_idx, 'R'), t, t))
+            chords_with_durations.append(chord_notes_with_durations)
+        self.chord_notes_with_durations = chords_with_durations
         return chords, times
 
     def get_next_notes(self):
@@ -218,7 +239,6 @@ class MidiTeacher:
                 self.measures.append(([], [], [], (start_x, end_x), (chord_idx, chord_idx)))
                 continue
             start_tick, end_tick = measure_tick_boundaries[i]
-            # Find chords in this measure
             measure_chord_indices = []
             while chord_idx < len(chord_times) and chord_times[chord_idx] < end_tick:
                 if chord_times[chord_idx] >= start_tick:

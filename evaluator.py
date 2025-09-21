@@ -36,33 +36,78 @@ class Evaluator:
             self._score = self._evaluate()
         return self._score
 
-    def _detect_legato(self, note_events):
-        """Detect legato playing by finding overlapping note_on and note_off events."""
-        active_notes = {}  # note -> start_time
-        legato_detected = False
-
-        for time, note, event_type in note_events:
+    def _detect_legato_per_chord(self, onsets, note_events):
+        """
+        For each chord transition, measure the total time (in ms) that notes from the previous chord overlap into the next chord.
+        Returns a list of floats (ms of overlap) per chord (the first chord is always 0.0).
+        """
+        note_times = {}
+        abs_on = {}
+        for t, note, event_type in note_events:
             if event_type == 'on':
-                if note in active_notes:
-                    legato_detected = True
-                active_notes[note] = time
-            elif event_type == 'off':
-                if note in active_notes:
-                    del active_notes[note]
+                abs_on[note] = t
+            elif event_type == 'off' and note in abs_on:
+                note_times.setdefault(note, []).append((abs_on[note], t))
+                del abs_on[note]
+        chord_legato = [0.0] * len(onsets)
+        for i in range(1, len(onsets)):
+            prev_onset, prev_notes = onsets[i-1]
+            curr_onset, _ = onsets[i]
+            overlap_sum = 0.0
+            for note in prev_notes:
+                times = note_times.get(note, [])
+                for on, off in times:
+                    if on <= prev_onset < off:
+                        if off > curr_onset:
+                            overlap = off - curr_onset
+                            overlap_sum += max(0, overlap)
+                        break
+            chord_legato[i] = overlap_sum
+        return chord_legato
 
-        return legato_detected
-
-    def _is_chord_legato(self, chord_index, recorded_onsets, legato_detected):
-        """Determine if a specific chord has legato issues."""
-        if not legato_detected or chord_index >= len(self.section.chords):
-            return False
-        if chord_index < len(recorded_onsets):
-            chord_notes = set(n for n, _hand in self.section.chords[chord_index])
-            recorded_notes = recorded_onsets[chord_index][1]
-            if len(recorded_notes) > len(chord_notes):
-                return True
-                
-        return False
+    def _detect_reference_legato_per_chord(self, chord_indices):
+        """
+        For each reference chord transition, measure the total time (in ticks) that notes from the previous chord overlap into the next chord.
+        Returns a list of floats (ticks of overlap) per chord (the first chord is always 0.0).
+        """
+        chord_legato = [0.0] * len(chord_indices)
+        prev_onset = None
+        prev_notes = []
+        prev_offsets = {}
+        for i, idx in enumerate(chord_indices):
+            if idx >= len(self.teacher.chord_notes_with_durations):
+                continue
+            chord_notes = self.teacher.chord_notes_with_durations[idx]
+            if not chord_notes:
+                prev_onset = None
+                prev_notes = []
+                prev_offsets = {}
+                continue
+            onset = chord_notes[0][2]
+            notes = [note for note, _hand, _on, _off in chord_notes]
+            offsets = {note: off for note, _hand, _on, off in chord_notes}
+            if prev_onset is not None:
+                overlap_sum = 0.0
+                for note in prev_notes:
+                    off = prev_offsets.get(note, prev_onset)
+                    if off > onset:
+                        overlap = off - onset
+                        overlap_sum += max(0, overlap)
+                chord_legato[i] = overlap_sum
+            prev_onset = onset
+            prev_notes = notes
+            prev_offsets = offsets
+        mid = mido.MidiFile(self.teacher.midi_path)
+        ticks_per_beat = mid.ticks_per_beat
+        tempo = 500000
+        for track in mid.tracks:
+            for msg in track:
+                if msg.type == 'set_tempo':
+                    tempo = msg.tempo
+                    break
+        tick_to_ms = lambda ticks: (ticks * tempo) / (ticks_per_beat * 1000)
+        chord_legato = [tick_to_ms(x) for x in chord_legato]
+        return chord_legato
 
     def _evaluate(self) -> Score:
         events = []
@@ -76,8 +121,6 @@ class Evaluator:
             elif msg.type == 'note_off' or (msg.type == 'note_on' and getattr(msg, 'velocity', 0) == 0):
                 note_events.append((abs_ms, msg.note, 'off'))
 
-        legato_detected = self._detect_legato(note_events)
-        
         threshold_ms = 50
         recorded_onsets = []
         for t, note in events:
@@ -87,8 +130,10 @@ class Evaluator:
                 recorded_onsets[-1][1].add(note)
         recorded_onsets = [(o[0], o[1]) for o in recorded_onsets]
 
+        rec_legato_per_chord = self._detect_legato_per_chord(recorded_onsets, note_events)
+
         if not self.section.chords:
-            self.analytics = {'reason': 'no_chords', 'legato_detected': legato_detected}
+            self.analytics = {'reason': 'no_chords'}
             return Score(1.0, 1.0, 1.0, 1.0)
 
         chord_indices = list(range(self.start_idx, self.end_idx + 1))
@@ -98,6 +143,8 @@ class Evaluator:
                 chord_ticks.append(self.teacher.chord_times[idx])
             except Exception:
                 chord_ticks.append(None)
+
+        ref_legato_per_chord = self._detect_reference_legato_per_chord(chord_indices)
 
         def tick_to_seconds(tick):
             if tick is None:
@@ -136,7 +183,7 @@ class Evaluator:
         ref_chords = [set(n for n, _hand in chord) for chord in self.section.chords]
 
         if not recorded_onsets:
-            self.analytics = {'reason': 'no_recording', 'legato_detected': legato_detected}
+            self.analytics = {'reason': 'no_recording'}
             return Score(0.0, 0.0, 0.0, 0.0)
 
         n_ref = len(ref_onsets_ms)
@@ -146,18 +193,19 @@ class Evaluator:
         acc_scores = []
         per_chord_issues = []
         legato_issues = []
-        
         for i in range(m):
             ref_set = ref_chords[i]
             rec_set = recorded_onsets[i][1]
             if not ref_set and not rec_set:
                 acc_scores.append(1.0)
                 per_chord_issues.append({'missed': set(), 'extra': set(), 'score': 1.0})
-                legato_issues.append(False)
+                legato_issues.append(0.0)
                 continue
 
-            chord_legato = self._is_chord_legato(i, recorded_onsets, legato_detected)
-            legato_issues.append(chord_legato)
+            rec_legato = rec_legato_per_chord[i] if i < len(rec_legato_per_chord) else 0.0
+            ref_legato = ref_legato_per_chord[i] if i < len(ref_legato_per_chord) else 0.0
+            legato_amount = max(0.0, rec_legato - ref_legato)
+            legato_issues.append(legato_amount)
 
             inter = len(ref_set & rec_set)
             denom = (len(ref_set) + len(rec_set))
@@ -165,18 +213,16 @@ class Evaluator:
                 s = 1.0
             else:
                 s = (2.0 * inter) / denom
-                if chord_legato and len(ref_set & rec_set) == len(ref_set):
+                if legato_amount > 0 and len(ref_set & rec_set) == len(ref_set):
                     s = max(s, 0.8)
-            
             acc_scores.append(s)
-            per_chord_issues.append({'missed': (ref_set - rec_set), 'extra': (rec_set - ref_set), 'score': s})
-            
+            per_chord_issues.append({'missed': (ref_set - rec_set), 'extra': (rec_set - ref_set), 'score': s, 'legato': legato_amount})
         if n_rec < n_ref:
             acc_scores.extend([0.0] * (n_ref - n_rec))
             for i in range(n_rec, n_ref):
-                per_chord_issues.append({'missed': ref_chords[i], 'extra': set(), 'score': 0.0})
-                legato_issues.append(False)
-                
+                per_chord_issues.append({'missed': ref_chords[i], 'extra': set(), 'score': 0.0, 'legato': 0.0})
+                legato_issues.append(0.0)
+
         accuracy_score = sum(acc_scores) / max(1, n_ref)
 
         def intervals(xs):
@@ -229,7 +275,19 @@ class Evaluator:
         if ref_total > 0 and m > 1:
             tempo_bias = float(rec_total - ref_total) / float(ref_total)
 
-        legato_severity = sum(legato_issues) / max(1, len(legato_issues)) if legato_issues else 0.0
+        note_durations = []
+        note_on_times = {}
+        abs_time = 0
+        for msg in self.recording:
+            abs_time += getattr(msg, 'time', 0)
+            if msg.type == 'note_on' and getattr(msg, 'velocity', 0) > 0:
+                note_on_times[msg.note] = abs_time
+            elif (msg.type == 'note_off' or (msg.type == 'note_on' and getattr(msg, 'velocity', 0) == 0)) and msg.note in note_on_times:
+                note_durations.append(abs_time - note_on_times[msg.note])
+                del note_on_times[msg.note]
+        avg_note_length = sum(note_durations) / len(note_durations) if note_durations else 1.0
+        avg_legato_overlap = sum(legato_issues) / len(legato_issues) if legato_issues else 0.0
+        legato_severity = avg_legato_overlap / avg_note_length if avg_note_length > 0 else 0.0
 
         analytics = {
             'accuracy': accuracy_score,
@@ -246,9 +304,11 @@ class Evaluator:
             'n_rec': n_rec,
             'ref_onsets_ms': ref_onsets_ms,
             'rec_onsets_ms': [t for t, _ in recorded_onsets[:m]],
-            'legato_detected': legato_detected,
+            'legato_detected': any(l > 0.05 for l in rec_legato_per_chord),
             'legato_issues': legato_issues,
             'legato_severity': legato_severity,
+            'rec_legato_per_chord': rec_legato_per_chord,
+            'ref_legato_per_chord': ref_legato_per_chord,
         }
 
         self.analytics = analytics
@@ -290,7 +350,7 @@ class Evaluator:
             return "Machine Perfect! Keep it up! But don't forget to play with feeling."
 
         if score.overall >= 0.98:
-            if legato_detected and legato_severity > 0.1:
+            if legato_detected and legato_severity > 0.2 and abs(tempo_bias) < 0.02 and legato_severity > 0.25:
                 return "Almost perfect! Try releasing notes cleanly between chords for better articulation."
             if tempo_bias is not None and abs(tempo_bias) > 0.02:
                 if tempo_bias > 0:
@@ -311,7 +371,7 @@ class Evaluator:
                 return "Work on articulation — make sure notes don't overlap between different chords."
 
         if primary == 'accuracy':
-            if legato_detected and legato_severity > 0.3:
+            if legato_detected and legato_severity > 0.35:
                 return "You're playing the right notes but they're connecting too much — focus on clean separation between chords."
             
             if worst_chord_idx is None:
@@ -325,7 +385,6 @@ class Evaluator:
                 return f"Focus on pressing the right keys at the {self._ordinal(human_idx)} chord (you missed: {notes})."
             if extra and not missed:
                 notes = ','.join(str(n) for n in sorted(extra))
-                # Check if the extra notes might be from legato
                 if legato_detected:
                     return f"Release notes cleanly at the {self._ordinal(human_idx)} chord — some notes from previous chords are still sounding."
                 return f"Avoid extra keys at the {self._ordinal(human_idx)} chord (extra: {notes})."
