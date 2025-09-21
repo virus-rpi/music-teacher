@@ -1,6 +1,8 @@
 # MIDI Piano Visualizer & Teacher
 
-A real-time MIDI piano visualizer and teaching tool for Linux, designed for use with a MIDI keyboard and SoundFont synthesizer. This application displays a virtual piano, sheet music, and interactive overlays to help users learn and practice piano pieces from MIDI files.
+A real-time MIDI piano visualizer and teaching tool, designed for use with a MIDI keyboard and SoundFont synthesizer. This application displays a virtual piano, sheet music, and interactive overlays to help users learn and practice piano pieces from MIDI files.
+This is still a work in progress and use may need some tinkering. 
+Help is appreciated!
 
 ## Features
 
