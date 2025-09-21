@@ -112,21 +112,26 @@ def draw_progress_bar(surface, progress, dims):
     x = int((screen_width - bar_width) / 2)
     y = bar_margin
 
-    shadow_offset = 4
+    mask_surface = pygame.Surface((bar_width, bar_height), pygame.SRCALPHA)
+    pygame.draw.rect(mask_surface, (255, 255, 255), mask_surface.get_rect(), border_radius=14)
+
+    shadow_offset = 6
     shadow_color = (0, 0, 0, 80)
     shadow_surface = pygame.Surface((bar_width, bar_height), pygame.SRCALPHA)
     pygame.draw.rect(shadow_surface, shadow_color, shadow_surface.get_rect(), border_radius=14)
     surface.blit(shadow_surface, (x + shadow_offset, y + shadow_offset))
 
-    bg_color = (40, 40, 60, 180)
+    bg_color = (30, 30, 50, 255)
     bg_surface = pygame.Surface((bar_width, bar_height), pygame.SRCALPHA)
     pygame.draw.rect(bg_surface, bg_color, bg_surface.get_rect(), border_radius=14)
+    bg_surface.blit(mask_surface, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
     surface.blit(bg_surface, (x, y))
 
     fill_width = int(bar_width * progress)
     if fill_width > 0:
         fill_surface = pygame.Surface((fill_width, bar_height), pygame.SRCALPHA)
         pygame.draw.rect(fill_surface, (0, 200, 255), (0, 0, fill_width, bar_height), border_radius=14)
+        fill_surface.blit(mask_surface, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
         surface.blit(fill_surface, (x, y))
 
     font = pygame.font.SysFont("Segoe UI", 22, bold=True)
