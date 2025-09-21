@@ -9,6 +9,7 @@ from synth import Synth
 from abc import ABC, abstractmethod
 import json
 import os
+from analytics_popup import AnalyticsPopup
 
 CHORDS_PER_SECTION = (3, 4)
 STATE_FILE = 'guided_teacher_state.json'
@@ -256,6 +257,7 @@ class GuidedTeacher:
         self._loop_info_before = None
         self.evaluator_history = {}
         self._state_file = STATE_FILE
+        self.analytics_popup = AnalyticsPopup(self)
         self.load_state()
 
     def get_last_score(self):
@@ -283,6 +285,15 @@ class GuidedTeacher:
     def update(self, pressed_notes, pressed_note_events, pygame_events):
         if not self.is_active:
             return
+
+        for event in pygame_events:
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_TAB:
+                    self.analytics_popup.toggle()
+                    return
+        if self.analytics_popup.visible:
+            return
+
         if not self.current_task and self.tasks:
             self.next_task()
         self.current_task.on_tick(pressed_notes, pressed_note_events, pygame_events)
@@ -297,6 +308,10 @@ class GuidedTeacher:
                     self.auto_advance = not self.auto_advance
                     print(f"Auto advance: {self.auto_advance}")
         self.save_state()
+
+    def render(self, surface):
+        if hasattr(self, 'analytics_popup'):
+            self.analytics_popup.draw(surface)
 
     def generate_tasks_for_measure(self, measure_index):
         self.tasks.clear()

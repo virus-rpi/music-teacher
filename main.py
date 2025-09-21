@@ -102,6 +102,8 @@ def render():
         draw_guided_mode_overlay(screen, guided_teacher, sheet_music_renderer, dims)
     sheet_music_renderer.draw(screen, dims.get('SHEET_Y', 0), midi_teacher.get_progress(), guided_teacher, sheet_alpha_current)
 
+    guided_teacher.render(screen)
+
     pygame.display.flip()
 
 
