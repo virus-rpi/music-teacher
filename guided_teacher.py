@@ -68,9 +68,12 @@ class PracticeSectionTask(Task):
 
         self.timer_start = None
         self.recording = mido.MidiTrack()
-        # tracking to avoid repeated on/off messages while a key remains held
+
         self._prev_pressed_notes = set()
         self._last_record_time = None
+
+        self._waiting_for_wrap_release = False
+        self._wrap_pressed_notes = set()
 
     def on_start(self):
         self.teacher.current_section_visual_info = self.section.xs
@@ -88,13 +91,30 @@ class PracticeSectionTask(Task):
         self._handle_pygame_events(pygame_events)
         self._handle_midi_events(pressed_notes, pressed_note_events)
 
-        if self.teacher.midi_teacher.did_wrap_and_clear():
-            self._handle_evaluate()
+        if self._waiting_for_wrap_release:
+            if not (self._wrap_pressed_notes & pressed_notes):
+                self._waiting_for_wrap_release = False
+                self._wrap_pressed_notes.clear()
+                self._handle_evaluate()
 
-            self.recording.clear()
-            self._prev_pressed_notes.clear()
-            self.timer_start = None
-            self._last_record_time = None
+                self.recording.clear()
+                self._prev_pressed_notes.clear()
+                self.timer_start = None
+                self._last_record_time = None
+            return
+
+        if self.teacher.midi_teacher.did_wrap_and_clear():
+            wrap_pressed = pressed_notes.copy()
+            if not wrap_pressed:
+                self._handle_evaluate()
+
+                self.recording.clear()
+                self._prev_pressed_notes.clear()
+                self.timer_start = None
+                self._last_record_time = None
+            else:
+                self._waiting_for_wrap_release = True
+                self._wrap_pressed_notes = wrap_pressed
 
     def _handle_pygame_events(self, pygame_events):
         for event in pygame_events:
@@ -145,14 +165,15 @@ class PracticeSectionTask(Task):
         print(self.recording)
         evaluator = Evaluator(self)
         score = evaluator.score
+        guidance_text = evaluator.generate_guidance(score)
 
         self.teacher.last_score = score.overall
         print(f"Eval: accuracy={score.accuracy:.3f} rel={score.relative_timing:.3f} abs={score.absolute_timing:.3f} -> score={score.overall:.3f}")
         if score.overall > 0.95 and self.teacher.auto_advance:
             self.teacher.next_task()
-            self.teacher.guide_text = None
+            self.teacher.guide_text = "Great! " + guidance_text
         else:
-            self.teacher.guide_text = evaluator.generate_guidance(score)
+            self.teacher.guide_text = guidance_text
 
 class PracticeMeasureTask(PracticeSectionTask):
     def __init__(self, teacher: 'GuidedTeacher', measure):
