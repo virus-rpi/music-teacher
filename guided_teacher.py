@@ -292,6 +292,8 @@ class GuidedTeacher:
                     self.analytics_popup.toggle()
                     return
         if self.analytics_popup.visible:
+            for event in pygame_events:
+                self.analytics_popup.handle_event(event)
             return
 
         if not self.current_task and self.tasks:

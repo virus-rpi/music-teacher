@@ -15,9 +15,86 @@ class AnalyticsPopup:
         self.margin = 30
         self.font = None
         self.small_font = None
+        self.selected_key = None
+        self.measure_keys = []
+        self.selected_measure_idx = 0
+        self.selected_section_idx = 0
+        self.dropdown_open = None  # None, 'measure', or 'section'
 
     def toggle(self):
         self.visible = not self.visible
+        if self.visible:
+            self._init_selector()
+
+    def _init_selector(self):
+        hist = self.teacher.evaluator_history
+        # Parse measure/section from keys
+        measure_sections = {}
+        for key in hist.keys():
+            parts = key.split('_')
+            measure = parts[0]
+            measure_sections.setdefault(measure, []).append(key)
+        self.measure_list = sorted(measure_sections.keys(), key=lambda m: int(m))
+        self.section_dict = {m: sorted(measure_sections[m], key=lambda k: hist[k].get('scores', [-1])[-1] if hist[k].get('scores') else -1) for m in self.measure_list}
+        # Default to last measure/section
+        if self.measure_list:
+            self.selected_measure_idx = len(self.measure_list) - 1
+            measure = self.measure_list[self.selected_measure_idx]
+            self.selected_section_idx = len(self.section_dict[measure]) - 1
+        else:
+            self.selected_measure_idx = 0
+            self.selected_section_idx = 0
+        self.dropdown_open = None
+
+    def _get_selected_key(self):
+        if not self.measure_list:
+            return None
+        measure = self.measure_list[self.selected_measure_idx]
+        section_keys = self.section_dict[measure]
+        if not section_keys:
+            return None
+        return section_keys[self.selected_section_idx]
+
+    def _get_selected_analytics(self):
+        key = self._get_selected_key()
+        if not key:
+            return None
+        hist = self.teacher.evaluator_history
+        entry = hist.get(key, {})
+        analytics_list = entry.get('analytics', [])
+        if analytics_list:
+            return analytics_list[-1]
+        return None
+
+    def handle_event(self, event):
+        if not self.visible or not self.measure_list:
+            return
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            mx, my = event.pos
+            if hasattr(self, 'measure_dropdown_rect') and self.measure_dropdown_rect.collidepoint(mx, my):
+                self.dropdown_open = 'measure' if self.dropdown_open != 'measure' else None
+                return
+            if hasattr(self, 'section_dropdown_rect') and self.section_dropdown_rect.collidepoint(mx, my):
+                self.dropdown_open = 'section' if self.dropdown_open != 'section' else None
+                return
+            if self.dropdown_open == 'measure':
+                for i, rect in enumerate(self.measure_option_rects):
+                    if rect.collidepoint(mx, my):
+                        self.selected_measure_idx = i
+                        self.selected_section_idx = 0
+                        self.dropdown_open = None
+                        return
+            if self.dropdown_open == 'section':
+                measure = self.measure_list[self.selected_measure_idx]
+                for i, rect in enumerate(self.section_option_rects):
+                    if rect.collidepoint(mx, my):
+                        self.selected_section_idx = i
+                        self.dropdown_open = None
+                        return
+            self.dropdown_open = None
+        elif event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                self.dropdown_open = None
 
     def draw(self, surface):
         if not self.visible:
@@ -44,14 +121,77 @@ class AnalyticsPopup:
         right_x = x + left_w + pad_side // 2
         content_w = left_w - pad_side * 2
         content_h = self.height - pad_top * 2
-        # Title
-        title = self.font.render('Performance Analytics', True, (255, 255, 255))
-        surface.blit(title, (left_x, y + pad_top))
-        curr_y = y + pad_top + title.get_height() + int(self.height * 0.01)
-        # Overall score text
-        analytics = self._get_last_analytics()
+        # Title with dropdowns
+        curr_y = y + pad_top
+        curr_x = left_x
+        title_txt = self.font.render('Performance Analytics for ', True, (255,255,255))
+        title_h = title_txt.get_height()
+        surface.blit(title_txt, (curr_x, curr_y))
+        curr_x += title_txt.get_width()
+        # Measure dropdown (dark mode, wider, vertically centered)
+        measure = self.measure_list[self.selected_measure_idx] if self.measure_list else '—'
+        measure_label = f"Measure {measure}"
+        measure_surf = self.font.render(measure_label, True, (255,255,255))
+        dropdown_h = max(measure_surf.get_height(), title_h) + 8
+        dropdown_w = measure_surf.get_width() + 36
+        measure_bg = pygame.Rect(curr_x, curr_y + (title_h - dropdown_h)//2, dropdown_w, dropdown_h)
+        pygame.draw.rect(surface, (40,40,40), measure_bg, border_radius=6)
+        pygame.draw.rect(surface, (80,80,80), measure_bg, 2, border_radius=6)
+        surface.blit(measure_surf, (curr_x+8, measure_bg.y + (dropdown_h - measure_surf.get_height())//2))
+        # Down chevron
+        chevron_x = curr_x + dropdown_w - 20
+        chevron_y = measure_bg.y + dropdown_h//2
+        pygame.draw.polygon(surface, (200,200,200), [
+            (chevron_x, chevron_y-5), (chevron_x+10, chevron_y-5), (chevron_x+5, chevron_y+4)
+        ])
+        self.measure_dropdown_rect = measure_bg
+        curr_x += dropdown_w + 10
+        # Dash
+        dash_surf = self.font.render('-', True, (255,255,255))
+        surface.blit(dash_surf, (curr_x, curr_y))
+        curr_x += dash_surf.get_width() + 10
+        # Section dropdown (dark mode, wider, vertically centered)
+        measure = self.measure_list[self.selected_measure_idx] if self.measure_list else '—'
+        section_keys = self.section_dict[measure] if self.measure_list else []
+        section_idx = self.selected_section_idx
+        section_label = f"Section {section_idx+1}" if section_keys else '—'
+        section_surf = self.font.render(section_label, True, (255,255,255))
+        section_dropdown_w = section_surf.get_width() + 36
+        section_bg = pygame.Rect(curr_x, curr_y + (title_h - dropdown_h)//2, section_dropdown_w, dropdown_h)
+        pygame.draw.rect(surface, (40,40,40), section_bg, border_radius=6)
+        pygame.draw.rect(surface, (80,80,80), section_bg, 2, border_radius=6)
+        surface.blit(section_surf, (curr_x+8, section_bg.y + (dropdown_h - section_surf.get_height())//2))
+        chevron_x = curr_x + section_dropdown_w - 20
+        chevron_y = section_bg.y + dropdown_h//2
+        pygame.draw.polygon(surface, (200,200,200), [
+            (chevron_x, chevron_y-5), (chevron_x+10, chevron_y-5), (chevron_x+5, chevron_y+4)
+        ])
+        self.section_dropdown_rect = section_bg
+        curr_x += section_dropdown_w + 10
+        # Dropdown options if open
+        self.measure_option_rects = []
+        self.section_option_rects = []
+        if self.dropdown_open == 'measure':
+            for i, m in enumerate(self.measure_list):
+                opt_label = f"Measure {m}"
+                opt_surf = self.font.render(opt_label, True, (255,255,255))
+                opt_bg = pygame.Rect(self.measure_dropdown_rect.x, self.measure_dropdown_rect.bottom + i*dropdown_h, self.measure_dropdown_rect.width, dropdown_h)
+                pygame.draw.rect(surface, (40,40,40), opt_bg, border_radius=6)
+                pygame.draw.rect(surface, (80,80,80), opt_bg, 2, border_radius=6)
+                surface.blit(opt_surf, (opt_bg.x+16, opt_bg.y + (dropdown_h - opt_surf.get_height())//2))
+                self.measure_option_rects.append(opt_bg)
+        if self.dropdown_open == 'section':
+            for i, key in enumerate(section_keys):
+                opt_label = f"Section {i+1}"
+                opt_surf = self.font.render(opt_label, True, (255,255,255))
+                opt_bg = pygame.Rect(self.section_dropdown_rect.x, self.section_dropdown_rect.bottom + i*dropdown_h, self.section_dropdown_rect.width, dropdown_h)
+                pygame.draw.rect(surface, (40,40,40), opt_bg, border_radius=6)
+                pygame.draw.rect(surface, (80,80,80), opt_bg, 2, border_radius=6)
+                surface.blit(opt_surf, (opt_bg.x+16, opt_bg.y + (dropdown_h - opt_surf.get_height())//2))
+                self.section_option_rects.append(opt_bg)
+        curr_y += title_h + 10
+        analytics = self._get_selected_analytics()
         if analytics and 'accuracy' in analytics and 'relative' in analytics and 'absolute' in analytics:
-            # Use same weights as in evaluator.py
             overall = 0.6 * analytics['accuracy'] + 0.25 * analytics['relative'] + 0.15 * analytics['absolute']
             score_txt = self.font.render(f"Overall Score: {overall*100:.1f}%", True, (255,255,255))
             surface.blit(score_txt, (left_x, curr_y))
