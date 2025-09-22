@@ -32,6 +32,7 @@ Help is appreciated!
 - **Improved Sheet Music Rendering**: Remove duplicate clefs and make sure the height stays consistent.
 - **Visual Feedback For Mistakes**: Show wrong notes and wrong timings in relation to how it should be, so it's easier to understand what to change.
 - **More Tips**: Add more tips for improving your score, including techniques for how to play certain things better (e.g. how to play fast consecutive notes)
+- **Rythmgame Mode**: Let the notes scroll down as bars and let the user play them as they appear.
 
 ## Usage
 
