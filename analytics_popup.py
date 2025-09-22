@@ -107,6 +107,15 @@ class AnalyticsPopup:
         self.measure_list = []
         self.section_dict = {}
         self._init_selector()
+        # Backwards-compatibility / defensive defaults for attributes that
+        # older parts of the code expect (prevents IDE/runtime warnings).
+        self.dropdown_open = None
+        self.pass_dropdown_rect = None
+        self.pass_option_rects = []
+        self.measure_dropdown_rect = None
+        self.measure_option_rects = []
+        self.section_dropdown_rect = None
+        self.section_option_rects = []
 
     def toggle(self):
         self.visible = not self.visible
@@ -402,32 +411,25 @@ class AnalyticsPopup:
         self._last_update_ms = now
         self.ui_manager.update(dt)
         overlay = pygame.Surface((sw, sh), pygame.SRCALPHA)
-        pygame.draw.rect(overlay, (0, 0, 0, 180), (0, 0, sw, sh))
+        # slightly rounded overlay for a softer, modern look
+        pygame.draw.rect(overlay, (0, 0, 0, 180), (0, 0, sw, sh), border_radius=20)
         # Draw UI onto overlay
         self.ui_manager.draw_ui(overlay)
         surface.blit(overlay, (0, 0))
 
-    def _draw_explanations(self, surface, x, y):
-        explanations = [
-            ('Accuracy', 'How accurate you pressed the correct notes.'),
-            ('Relative', 'How well your timing is aligned with the reference relative to your tempo.'),
-            ('Absolute', 'How close your tempo is to the reference tempo.'),
-            ('Legato', 'Ratio between the average note overlap difference to the reference compared to the average note length.'),
-        ]
-        for i, (label, desc) in enumerate(explanations):
-            txt = self.small_font.render(f'{label}: {desc}', True, (255,255,255))
-            surface.blit(txt, (x, y + i*20))
+    def _round_surface_corners(self, surf, radius=12):
+        """Return a copy of `surf` with rounded corners using an alpha mask.
 
-    def _get_last_analytics(self):
-        hist = self.teacher.evaluator_history
-        if not hist:
-            return None
-        last = None
-        for k in sorted(hist.keys(), key=lambda k: hist[k].get('scores', [-1])[-1] if hist[k].get('scores') else -1):
-            last = hist[k]
-        if last and 'analytics' in last and last['analytics']:
-            return last['analytics'][-1]
-        return None
+        The mask approach is fast and avoids creating per-pixel loops.
+        """
+        if radius <= 0:
+            return surf
+        w, h = surf.get_size()
+        mask = pygame.Surface((w, h), pygame.SRCALPHA)
+        pygame.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(), border_radius=radius)
+        out = surf.copy()
+        out.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+        return out
 
     def _matplotlib_bar_chart(self, analytics, width=300, height=200):
         labels = ['Accuracy', 'Relative', 'Absolute', 'Legato']
@@ -457,6 +459,8 @@ class AnalyticsPopup:
         plt.close(fig)
         buf.seek(0)
         img = pygame.image.load(buf, 'bar_chart.png').convert_alpha()
+        # apply rounded corners for visual polish
+        img = self._round_surface_corners(img, radius=12)
         return img
 
     def _matplotlib_spider_chart(self, analytics, width=300, height=200):
@@ -488,6 +492,8 @@ class AnalyticsPopup:
         plt.close(fig)
         buf.seek(0)
         img = pygame.image.load(buf, 'spider_chart.png').convert_alpha()
+        # apply rounded corners for visual polish
+        img = self._round_surface_corners(img, radius=12)
         return img
 
     def _draw_tips(self, surface, x, y, analytics, max_height=100):
@@ -555,7 +561,7 @@ class AnalyticsPopup:
         if self.font is None:
             self.font = pygame.font.SysFont('Arial', 22)
         # Draw pass dropdown options
-        if self.dropdown_open == 'pass' and self.pass_dropdown_rect and self.pass_option_rects:
+        if getattr(self, 'dropdown_open', None) == 'pass' and self.pass_dropdown_rect and self.pass_option_rects:
             for i, opt_bg in enumerate(self.pass_option_rects):
                 opt_label = f"Pass {i+1}"
                 opt_surf = self.font.render(opt_label, True, (255,255,255))
@@ -563,21 +569,26 @@ class AnalyticsPopup:
                 pygame.draw.rect(surface, (80,80,80), opt_bg, 2, border_radius=6)
                 surface.blit(opt_surf, (opt_bg.x+16, opt_bg.y + (self.pass_dropdown_rect.height - opt_surf.get_height())//2))
         # Draw measure dropdown options
-        if self.dropdown_open == 'measure' and hasattr(self, 'measure_option_rects'):
+        if getattr(self, 'dropdown_open', None) == 'measure' and getattr(self, 'measure_option_rects', None):
             for i, m in enumerate(self.measure_list):
                 opt_label = f"Measure {m}"
                 opt_surf = self.font.render(opt_label, True, (255,255,255))
-                opt_bg = self.measure_option_rects[i]
-                pygame.draw.rect(surface, (40,40,40), opt_bg, border_radius=6)
-                pygame.draw.rect(surface, (80,80,80), opt_bg, 2, border_radius=6)
-                surface.blit(opt_surf, (opt_bg.x+16, opt_bg.y + (self.measure_dropdown_rect.height - opt_surf.get_height())//2))
-        if self.dropdown_open == 'section' and hasattr(self, 'section_option_rects'):
-            measure = self.measure_list[self.selected_measure_idx] if self.measure_list else '—'
-            section_keys = self.section_dict[measure] if self.measure_list else []
+                # defensive: ensure we have a rect for this option
+                if i < len(self.measure_option_rects):
+                    opt_bg = self.measure_option_rects[i]
+                    pygame.draw.rect(surface, (40,40,40), opt_bg, border_radius=6)
+                    pygame.draw.rect(surface, (80,80,80), opt_bg, 2, border_radius=6)
+                    if self.measure_dropdown_rect:
+                        surface.blit(opt_surf, (opt_bg.x+16, opt_bg.y + (self.measure_dropdown_rect.height - opt_surf.get_height())//2))
+        if getattr(self, 'dropdown_open', None) == 'section' and getattr(self, 'section_option_rects', None):
+            measure = self.measure_list[self._selected_measure_idx] if (self.measure_list and hasattr(self, '_selected_measure_idx')) else '—'
+            section_keys = self.section_dict.get(measure, []) if self.measure_list else []
             for i, key in enumerate(section_keys):
                 opt_label = f"Section {i+1}"
                 opt_surf = self.font.render(opt_label, True, (255,255,255))
-                opt_bg = self.section_option_rects[i]
-                pygame.draw.rect(surface, (40,40,40), opt_bg, border_radius=6)
-                pygame.draw.rect(surface, (80,80,80), opt_bg, 2, border_radius=6)
-                surface.blit(opt_surf, (opt_bg.x+16, opt_bg.y + (self.section_dropdown_rect.height - opt_surf.get_height())//2))
+                if i < len(self.section_option_rects):
+                    opt_bg = self.section_option_rects[i]
+                    pygame.draw.rect(surface, (40,40,40), opt_bg, border_radius=6)
+                    pygame.draw.rect(surface, (80,80,80), opt_bg, 2, border_radius=6)
+                    if self.section_dropdown_rect:
+                        surface.blit(opt_surf, (opt_bg.x+16, opt_bg.y + (self.section_dropdown_rect.height - opt_surf.get_height())//2))
