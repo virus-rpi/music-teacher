@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import pygame_gui
 
 class Dropdown:
     def __init__(self, options, value=0, width=150, font=None, label_prefix=None):
@@ -89,15 +90,43 @@ class AnalyticsPopup:
         self.small_font = None
         self.width = None
         self.height = None
-        self.measure_dropdown = None
-        self.section_dropdown = None
-        self.pass_dropdown = None
+        # pygame_gui related
+        self.ui_manager = pygame_gui.UIManager((800, 600))
+        self.window = None
+        self.panel = None
+        self.lbl_title = None
+        self.dd_measure = None
+        self.dd_section = None
+        self.dd_pass = None
+        self.img_bar = None
+        self.img_spider = None
+        self.tips_box = None
+        self._last_ui_build_size = None
+        self._last_update_ms = pygame.time.get_ticks()
+        # data
+        self.measure_list = []
+        self.section_dict = {}
         self._init_selector()
 
     def toggle(self):
         self.visible = not self.visible
         if self.visible:
             self._init_selector()
+            # UI will be (re)built on next draw with current surface size
+        else:
+            # destroy window/elements when hiding
+            if self.window is not None:
+                self.window.kill()
+                self.window = None
+                self.panel = None
+                self.lbl_title = None
+                self.dd_measure = None
+                self.dd_section = None
+                self.dd_pass = None
+                self.img_bar = None
+                self.img_spider = None
+                self.tips_box = None
+                self._last_ui_build_size = None
 
     def _init_selector(self):
         hist = self.teacher.evaluator_history
@@ -108,74 +137,190 @@ class AnalyticsPopup:
             measure_sections.setdefault(measure, []).append(key)
         self.measure_list = sorted(measure_sections.keys(), key=lambda m: int(m))
         self.section_dict = {m: sorted(measure_sections[m], key=lambda k: hist[k].get('scores', [-1])[-1] if hist[k].get('scores') else -1) for m in self.measure_list}
+        # default to last measure and last section if available
         if self.measure_list:
-            measure_idx = len(self.measure_list) - 1
-            measure = self.measure_list[measure_idx]
-            section_idx = len(self.section_dict[measure]) - 1
+            self._selected_measure_idx = len(self.measure_list) - 1
+            measure = self.measure_list[self._selected_measure_idx]
+            self._selected_section_idx = max(0, len(self.section_dict.get(measure, [])) - 1)
         else:
-            measure_idx = 0
-            section_idx = 0
-        self.measure_dropdown = Dropdown(self.measure_list, value=measure_idx, width=150, label_prefix="Measure")
-        section_options = self.section_dict[self.measure_list[measure_idx]] if self.measure_list else []
-        self.section_dropdown = Dropdown([f"Section {i+1}" for i in range(len(section_options))], value=section_idx, width=150, label_prefix=None)
-        self.pass_dropdown = Dropdown(["Pass 1"], value=0, width=100, label_prefix=None)
-        self._update_pass_dropdown()
+            self._selected_measure_idx = 0
+            self._selected_section_idx = 0
+        self._selected_pass_idx = 0
 
-    def _update_section_dropdown(self):
-        measure_idx = self.measure_dropdown.value
-        measure = self.measure_list[measure_idx] if self.measure_list else None
-        section_options = self.section_dict[measure] if measure else []
-        self.section_dropdown.options = [f"Section {i+1}" for i in range(len(section_options))]
-        if self.section_dropdown.value >= len(self.section_dropdown.options):
-            self.section_dropdown.value = max(0, len(self.section_dropdown.options)-1)
+    def _build_ui(self, sw, sh):
+        # Clear existing
+        if self.window is not None:
+            self.window.kill()
+        self._last_ui_build_size = (sw, sh)
+        self.width = int(sw * 0.95)
+        self.height = int(sh * 0.85)
+        x = (sw - self.width) // 2
+        y = (sh - self.height) // 4
+        self.window = pygame_gui.elements.UIWindow(
+            rect=pygame.Rect(x, y, self.width, self.height),
+            manager=self.ui_manager,
+            window_display_title='Performance Analytics',
+            object_id='#analytics_window'
+        )
+        container = self.window
+        # Title label and dropdowns
+        pad = 24
+        curr_x = pad
+        curr_y = pad
+        self.lbl_title = pygame_gui.elements.UILabel(
+            relative_rect=pygame.Rect(curr_x, curr_y, 260, 28),
+            text='Performance Analytics for',
+            manager=self.ui_manager,
+            container=container
+        )
+        curr_x += 260 + 8
+        # Measure dropdown
+        measure_options = [f"Measure {m}" for m in self.measure_list] if self.measure_list else ['—']
+        starting_measure = measure_options[self._selected_measure_idx] if self.measure_list else '—'
+        self.dd_measure = pygame_gui.elements.UIDropDownMenu(
+            options_list=measure_options,
+            starting_option=starting_measure,
+            relative_rect=pygame.Rect(curr_x, curr_y, 160, 28),
+            manager=self.ui_manager,
+            container=container
+        )
+        curr_x += 160 + 8
+        # Section dropdown
+        section_keys = self.section_dict.get(self.measure_list[self._selected_measure_idx], []) if self.measure_list else []
+        section_options = [f"Section {i+1}" for i in range(len(section_keys))] if section_keys else ['—']
+        starting_section = section_options[self._selected_section_idx] if section_keys else '—'
+        self.dd_section = pygame_gui.elements.UIDropDownMenu(
+            options_list=section_options,
+            starting_option=starting_section,
+            relative_rect=pygame.Rect(curr_x, curr_y, 140, 28),
+            manager=self.ui_manager,
+            container=container
+        )
+        curr_x += 140 + 8
+        # Pass dropdown
+        pass_count = self._get_selected_pass_count()
+        pass_options = [f"Pass {i+1}" for i in range(max(1, pass_count))]
+        starting_pass = pass_options[min(self._selected_pass_idx, len(pass_options)-1)]
+        self.dd_pass = pygame_gui.elements.UIDropDownMenu(
+            options_list=pass_options,
+            starting_option=starting_pass,
+            relative_rect=pygame.Rect(curr_x, curr_y, 120, 28),
+            manager=self.ui_manager,
+            container=container
+        )
+        # Charts and tips
+        content_top = curr_y + 28 + 16
+        left_w = int(self.width * 2 / 3)
+        content_w = left_w - pad * 2
+        content_h = self.height - pad * 2 - (content_top - pad)
+        chart_h = content_h // 3
+        self.img_bar = pygame_gui.elements.UIImage(
+            relative_rect=pygame.Rect(pad, content_top, content_w, chart_h),
+            image_surface=pygame.Surface((content_w, chart_h), pygame.SRCALPHA),
+            manager=self.ui_manager,
+            container=container
+        )
+        self.img_spider = pygame_gui.elements.UIImage(
+            relative_rect=pygame.Rect(pad, content_top + chart_h + 10, content_w, chart_h),
+            image_surface=pygame.Surface((content_w, chart_h), pygame.SRCALPHA),
+            manager=self.ui_manager,
+            container=container
+        )
+        # Tips box on the right
+        tips_x = pad + left_w
+        tips_w = self.width - tips_x - pad
+        self.tips_box = pygame_gui.elements.UITextBox(
+            html_text='',
+            relative_rect=pygame.Rect(tips_x, content_top, tips_w, content_h),
+            manager=self.ui_manager,
+            container=container
+        )
+        self._refresh_charts_and_tips()
 
-    def _update_pass_dropdown(self):
-        measure_idx = self.measure_dropdown.value
-        section_idx = self.section_dropdown.value
-        measure = self.measure_list[measure_idx] if self.measure_list else None
-        section_keys = self.section_dict[measure] if measure else []
-        pass_count = 1
-        if section_keys and section_idx < len(section_keys):
-            key = section_keys[section_idx]
-            hist = self.teacher.evaluator_history
-            entry = hist.get(key, {})
-            analytics_list = entry.get('analytics', [])
-            pass_count = len(analytics_list)
-        self.pass_dropdown.options = [f"Pass {i+1}" for i in range(pass_count)]
-        if self.pass_dropdown.value >= pass_count:
-            self.pass_dropdown.value = max(0, pass_count-1)
+    def _get_selected_pass_count(self):
+        measure_idx = self._selected_measure_idx
+        if not self.measure_list:
+            return 0
+        measure = self.measure_list[measure_idx]
+        section_keys = self.section_dict.get(measure, [])
+        if not section_keys:
+            return 0
+        if self._selected_section_idx >= len(section_keys):
+            return 0
+        key = section_keys[self._selected_section_idx]
+        entry = self.teacher.evaluator_history.get(key, {})
+        return len(entry.get('analytics', []))
+
+    def _rebuild_section_dropdown(self):
+        if self.dd_section is not None:
+            self.dd_section.kill()
+        section_keys = self.section_dict.get(self.measure_list[self._selected_measure_idx], []) if self.measure_list else []
+        section_options = [f"Section {i+1}" for i in range(len(section_keys))] if section_keys else ['—']
+        self._selected_section_idx = min(self._selected_section_idx, max(0, len(section_options)-1))
+        starting_section = section_options[self._selected_section_idx]
+        # place next to measure dropdown
+        rect = pygame.Rect(self.dd_measure.rect.right + 8 - self.window.rect.x, self.dd_measure.rect.y - self.window.rect.y, 140, 28)
+        self.dd_section = pygame_gui.elements.UIDropDownMenu(
+            options_list=section_options,
+            starting_option=starting_section,
+            relative_rect=rect,
+            manager=self.ui_manager,
+            container=self.window
+        )
+        # After changing section, pass index resets
+        self._selected_pass_idx = 0
+        self._rebuild_pass_dropdown()
+
+    def _rebuild_pass_dropdown(self):
+        if self.dd_pass is not None:
+            self.dd_pass.kill()
+        pass_count = self._get_selected_pass_count()
+        pass_options = [f"Pass {i+1}" for i in range(max(1, pass_count))]
+        self._selected_pass_idx = min(self._selected_pass_idx, len(pass_options)-1)
+        starting_pass = pass_options[self._selected_pass_idx]
+        rect = pygame.Rect(self.dd_section.rect.right + 8 - self.window.rect.x, self.dd_section.rect.y - self.window.rect.y, 120, 28)
+        self.dd_pass = pygame_gui.elements.UIDropDownMenu(
+            options_list=pass_options,
+            starting_option=starting_pass,
+            relative_rect=rect,
+            manager=self.ui_manager,
+            container=self.window
+        )
 
     def handle_event(self, event):
-        if not self.visible or not self.measure_list:
+        if not self.visible:
             return
-        def close_others(open_dropdown):
-            for d in [self.measure_dropdown, self.section_dropdown, self.pass_dropdown]:
-                if d is not open_dropdown:
-                    d.open = False
-        changed = self.measure_dropdown.tick(event, close_others)
-        if changed:
-            self._update_section_dropdown()
-            self.section_dropdown.value = 0
-            self._update_pass_dropdown()
-            self.pass_dropdown.value = 0
-            return
-        changed = self.section_dropdown.tick(event, close_others)
-        if changed:
-            self._update_pass_dropdown()
-            self.pass_dropdown.value = 0
-            return
-        self.pass_dropdown.tick(event, close_others)
+        self.ui_manager.process_events(event)
+        if event.type == pygame.USEREVENT and event.user_type == pygame_gui.UI_DROP_DOWN_MENU_CHANGED:
+            if event.ui_element == self.dd_measure:
+                # update selected measure index
+                if self.measure_list:
+                    self._selected_measure_idx = self.dd_measure.options_list.index(self.dd_measure.selected_option)
+                self._selected_section_idx = 0
+                self._selected_pass_idx = 0
+                self._rebuild_section_dropdown()
+                self._refresh_charts_and_tips()
+            elif event.ui_element == self.dd_section:
+                section_options = self.dd_section.options_list
+                self._selected_section_idx = max(0, section_options.index(self.dd_section.selected_option)) if section_options else 0
+                self._selected_pass_idx = 0
+                self._rebuild_pass_dropdown()
+                self._refresh_charts_and_tips()
+            elif event.ui_element == self.dd_pass:
+                pass_options = self.dd_pass.options_list
+                self._selected_pass_idx = max(0, pass_options.index(self.dd_pass.selected_option)) if pass_options else 0
+                self._refresh_charts_and_tips()
 
     def _get_selected_key(self):
         if not self.measure_list:
             return None
-        measure = self.measure_list[self.measure_dropdown.value]
-        section_keys = self.section_dict[measure]
+        measure = self.measure_list[self._selected_measure_idx]
+        section_keys = self.section_dict.get(measure, [])
         if not section_keys:
             return None
-        if self.section_dropdown.value >= len(section_keys):
+        if self._selected_section_idx >= len(section_keys):
             return None
-        return section_keys[self.section_dropdown.value]
+        return section_keys[self._selected_section_idx]
 
     def _get_selected_analytics(self):
         key = self._get_selected_key()
@@ -185,58 +330,81 @@ class AnalyticsPopup:
         entry = hist.get(key, {})
         analytics_list = entry.get('analytics', [])
         if analytics_list:
-            idx = min(self.pass_dropdown.value, len(analytics_list) - 1)
+            idx = min(self._selected_pass_idx, len(analytics_list) - 1)
             return analytics_list[idx]
         return None
+
+    def _refresh_charts_and_tips(self):
+        analytics = self._get_selected_analytics()
+        if self.window is None:
+            return
+        # Compute sizes from existing image rects
+        bar_rect = self.img_bar.rect
+        spider_rect = self.img_spider.rect
+        content_w = bar_rect.width
+        bar_h = bar_rect.height
+        spider_h = spider_rect.height
+        if analytics:
+            bar_chart = self._matplotlib_bar_chart(analytics, width=content_w, height=bar_h)
+            self.img_bar.set_image(bar_chart)
+            spider_chart = self._matplotlib_spider_chart(analytics, width=content_w, height=spider_h)
+            self.img_spider.set_image(spider_chart)
+            # tips
+            tips_html = self._generate_tips_html(analytics, max_height=self.tips_box.rect.height)
+            self.tips_box.set_text(tips_html)
+        else:
+            # Clear contents
+            self.img_bar.set_image(pygame.Surface((content_w, bar_h), pygame.SRCALPHA))
+            self.img_spider.set_image(pygame.Surface((content_w, spider_h), pygame.SRCALPHA))
+            self.tips_box.set_text('<b>No analytics available yet.</b>')
+
+    def _generate_tips_html(self, analytics, max_height=100):
+        tips = []
+        if not analytics:
+            return '<i>No analytics available.</i>'
+        if analytics.get('worst_chord_idx') is not None:
+            idx = analytics['worst_chord_idx'] + 1
+            score = analytics['worst_chord_score']
+            tips.append(f'Chord {idx} had the lowest accuracy: {score:.2f}')
+        if analytics.get('worst_interval_idx') is not None:
+            idx = analytics['worst_interval_idx'] + 1
+            diff = analytics['worst_interval_diff']
+            tips.append(f'Largest timing gap error between onsets {idx} and {idx + 1}: {diff:.2f}')
+        if analytics.get('tempo_bias') is not None:
+            bias = analytics['tempo_bias']
+            if abs(bias) > 0.02:
+                tips.append(f'Overall tempo was {"faster" if bias > 0 else "slower"} by {abs(bias) * 100:.1f}%')
+        if analytics.get('legato_detected'):
+            sev = analytics.get('legato_severity', 0)
+            tips.append(f'Legato severity {sev * 100:.1f}% (lower is better)')
+        if not tips:
+            tips = ['No major issues detected.']
+        # Convert to HTML list
+        list_items = ''.join([f'<li>{t}</li>' for t in tips])
+        return f'<b>Tips</b><ul>{list_items}</ul>'
 
     def draw(self, surface):
         if not self.visible:
             return
+        # Fonts still used by custom drawings (charts text)
         if self.font is None:
             self.font = pygame.font.SysFont('Arial', 22)
             self.small_font = pygame.font.SysFont('Arial', 16)
-            self.measure_dropdown.font = self.font
-            self.section_dropdown.font = self.font
-            self.pass_dropdown.font = self.font
-        overlay = pygame.Surface((surface.get_width(), surface.get_height()), pygame.SRCALPHA)
-        sw, sh = overlay.get_size()
-        self.width = int(sw * 0.95)
-        self.height = int(sh * 0.85)
-        pad = 32
-        pad_top = pad
-        pad_side = pad
-        x = (sw - self.width) // 2
-        y = (sh - self.height) // 4
+        # Background overlay
+        sw, sh = surface.get_size()
+        if (sw, sh) != self.ui_manager.window_resolution:
+            self.ui_manager.set_window_resolution((sw, sh))
+        if self.window is None or self._last_ui_build_size != (sw, sh):
+            self._build_ui(sw, sh)
+        # Update dt
+        now = pygame.time.get_ticks()
+        dt = max(0, now - self._last_update_ms) / 1000.0
+        self._last_update_ms = now
+        self.ui_manager.update(dt)
+        overlay = pygame.Surface((sw, sh), pygame.SRCALPHA)
         pygame.draw.rect(overlay, (0, 0, 0, 180), (0, 0, sw, sh))
-        pygame.draw.rect(overlay, (30, 30, 30), (x, y, self.width, self.height), border_radius=16)
-        pygame.draw.rect(overlay, (200, 200, 200), (x, y, self.width, self.height), 2, border_radius=16)
-        left_w = int(self.width * 2 / 3)
-        left_x = x + pad_side
-        content_w = left_w - pad_side * 2
-        content_h = self.height - pad_top * 2
-        curr_y = y + pad_top
-        curr_x = left_x
-        title_txt = self.font.render('Performance Analytics for ', True, (255,255,255))
-        title_h = title_txt.get_height()
-        overlay.blit(title_txt, (curr_x, curr_y))
-        curr_x += title_txt.get_width()
-        self.measure_dropdown.render_button(overlay, (curr_x, curr_y))
-        curr_x += self.measure_dropdown.rect.width + 10
-        self.section_dropdown.render_button(overlay, (curr_x, curr_y))
-        curr_x += self.section_dropdown.rect.width + 10
-        if len(self.pass_dropdown.options) > 1:
-            self.pass_dropdown.render_button(overlay, (curr_x, curr_y))
-        analytics = self._get_selected_analytics()
-        if analytics:
-            bar_chart = self._matplotlib_bar_chart(analytics, width=content_w, height=content_h // 3)
-            overlay.blit(bar_chart, (left_x, curr_y + title_h + 20))
-            spider_chart = self._matplotlib_spider_chart(analytics, width=content_w, height=content_h // 3)
-            overlay.blit(spider_chart, (left_x, curr_y + title_h + 20 + content_h // 3 + 10))
-            self._draw_tips(overlay, left_x, curr_y + title_h + 20 + 2 * (content_h // 3) + 20, analytics, max_height=content_h // 3)
-        # Render open dropdown options on top
-        for dropdown in [self.measure_dropdown, self.section_dropdown, self.pass_dropdown]:
-            if dropdown.open:
-                dropdown.render_options(overlay)
+        # Draw UI onto overlay
+        self.ui_manager.draw_ui(overlay)
         surface.blit(overlay, (0, 0))
 
     def _draw_explanations(self, surface, x, y):
@@ -386,7 +554,6 @@ class AnalyticsPopup:
             return
         if self.font is None:
             self.font = pygame.font.SysFont('Arial', 22)
-        dropdown_h = self.measure_dropdown_rect.height if hasattr(self, 'measure_dropdown_rect') else 32
         # Draw pass dropdown options
         if self.dropdown_open == 'pass' and self.pass_dropdown_rect and self.pass_option_rects:
             for i, opt_bg in enumerate(self.pass_option_rects):
