@@ -17,7 +17,7 @@ import atexit
 
 CHORDS_PER_SECTION = (3, 4)
 SAVE_ROOT = 'guided_teacher_save'
-SAVE_ZIP = 'guided_teacher_save.mtsf'
+SAVE_ZIP = 'guided_teacher_save.mtsf' # music teacher save file
 SAVE_THROTTLE_SECONDS = 2.0
 
 @dataclass(frozen=True)
@@ -181,22 +181,7 @@ class PracticeSectionTask(Task):
         guidance_text = evaluator.generate_guidance(score)
 
         self.teacher.last_score = score.overall
-        idx = getattr(self, 'measure', None)
-        section = getattr(self, 'section', None)
-        if idx is not None and section is not None:
-            # Find section index for this measure
-            measure_sections = self.teacher.split_measure_into_sections(idx)
-            section_idx = None
-            for i, sec in enumerate(measure_sections):
-                if sec.start_idx == section.start_idx and sec.end_idx == section.end_idx:
-                    section_idx = i
-                    break
-            if section_idx is not None:
-                # Count passes for this section
-                section_path = self.teacher._get_section_path(idx, section_idx)
-                os.makedirs(section_path, exist_ok=True)
-                pass_idx = len([f for f in os.listdir(section_path) if f.startswith('pass_') and f.endswith('.json')])
-                self.teacher.save_pass(idx, section_idx, pass_idx, getattr(evaluator, 'analytics', {}), score.overall, self.recording.copy())
+        self._save_pass(evaluator)
         print(f"Eval: accuracy={score.accuracy:.3f} rel={score.relative_timing:.3f} abs={score.absolute_timing:.3f} -> score={score.overall:.3f}")
         if score.overall > 0.95 and self.teacher.auto_advance:
             self.teacher.synth.play_success_sound()
@@ -204,6 +189,22 @@ class PracticeSectionTask(Task):
             self.teacher.guide_text = "Great! " + guidance_text
         else:
             self.teacher.guide_text = guidance_text
+
+    def _save_pass(self, evaluator):
+        if isinstance(self, PracticeMeasureTask):
+            section_idx = "measure"
+        elif isinstance(self, PracticeTransitionTask):
+            section_idx = "transition"
+        else:
+            section_idx = next((i for i, sec in enumerate(self.teacher.split_measure_into_sections(self.measure)) if sec.start_idx == self.section.start_idx and sec.end_idx == self.section.end_idx), None)
+        if section_idx is not None:
+            section_path = self.teacher.get_section_path(self.measure, section_idx)
+            os.makedirs(section_path, exist_ok=True)
+            pass_idx = len([f for f in os.listdir(section_path) if f.startswith('pass_') and f.endswith('.json')])
+            self.teacher.save_pass(self.measure, section_idx, pass_idx, getattr(evaluator, 'analytics', {}), evaluator.score.overall,
+                                   self.recording.copy())
+        else:
+            print(f"Could not find section {self.section.start_idx} {self.section.end_idx} in measure {self.measure}")
 
 class PracticeMeasureTask(PracticeSectionTask):
     def __init__(self, teacher: 'GuidedTeacher', measure):
@@ -295,11 +296,11 @@ class GuidedTeacher:
                         zipf.write(abs_path, rel_path)
             shutil.rmtree(self._save_root)
 
-    def _get_section_path(self, measure_idx, section_idx):
+    def get_section_path(self, measure_idx, section_idx):
         return os.path.join(self._save_root, f"measure_{measure_idx}", f"section_{section_idx}")
 
     def _get_pass_path(self, measure_idx, section_idx, pass_idx):
-        return os.path.join(self._get_section_path(measure_idx, section_idx), f"pass_{pass_idx}")
+        return os.path.join(self.get_section_path(measure_idx, section_idx), f"pass_{pass_idx}")
 
     def _get_state_path(self):
         return os.path.join(self._save_root, 'state.json')
@@ -510,7 +511,7 @@ class GuidedTeacher:
                 print(f"Failed to load state: {e}")
 
     def save_pass(self, measure_idx, section_idx, pass_idx, analytics, score, recording):
-        section_path = self._get_section_path(measure_idx, section_idx)
+        section_path = self.get_section_path(measure_idx, section_idx)
         os.makedirs(section_path, exist_ok=True)
         pass_path = self._get_pass_path(measure_idx, section_idx, pass_idx)
         with open(pass_path + '.json', 'w') as f:
@@ -528,12 +529,13 @@ class GuidedTeacher:
                 d = json.load(f)
                 analytics = d.get('analytics')
                 score = d.get('score')
-        except Exception:
-            pass
+        except (FileNotFoundError, json.JSONDecodeError):
+            print(f"Failed to load pass {pass_idx}")
         try:
             mid = mido.MidiFile(pass_path + '.mid')
             if mid.tracks:
                 recording = mid.tracks[0]
-        except Exception:
-            pass
+        except (FileNotFoundError, mido.KeySignatureError):
+            print(f"Failed to load recording for pass {pass_idx}")
         return analytics, score, recording
+
