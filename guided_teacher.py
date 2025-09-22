@@ -10,9 +10,15 @@ from abc import ABC, abstractmethod
 import json
 import os
 from analytics_popup import AnalyticsPopup
+import threading
+import zipfile
+import shutil
+import atexit
 
 CHORDS_PER_SECTION = (3, 4)
-STATE_FILE = 'guided_teacher_state.json'
+SAVE_ROOT = 'guided_teacher_save'
+SAVE_ZIP = 'guided_teacher_save.mtsf'
+SAVE_THROTTLE_SECONDS = 2.0
 
 @dataclass(frozen=True)
 class MeasureSection:
@@ -178,14 +184,19 @@ class PracticeSectionTask(Task):
         idx = getattr(self, 'measure', None)
         section = getattr(self, 'section', None)
         if idx is not None and section is not None:
-            section_key = f"{idx}_{section.start_idx}_{section.end_idx}"
-            hist = self.teacher.evaluator_history.setdefault(section_key, {'scores': [], 'best_score': 0.0, 'analytics': [], 'recording': None})
-            hist['scores'].append(score.overall)
-            hist['best_score'] = max(hist['best_score'], score.overall)
-            hist['analytics'].append(getattr(evaluator, 'analytics', {}))
-            hist['recording'] = self.recording.copy()
-            self.teacher.save_state()
-
+            # Find section index for this measure
+            measure_sections = self.teacher.split_measure_into_sections(idx)
+            section_idx = None
+            for i, sec in enumerate(measure_sections):
+                if sec.start_idx == section.start_idx and sec.end_idx == section.end_idx:
+                    section_idx = i
+                    break
+            if section_idx is not None:
+                # Count passes for this section
+                section_path = self.teacher._get_section_path(idx, section_idx)
+                os.makedirs(section_path, exist_ok=True)
+                pass_idx = len([f for f in os.listdir(section_path) if f.startswith('pass_') and f.endswith('.json')])
+                self.teacher.save_pass(idx, section_idx, pass_idx, getattr(evaluator, 'analytics', {}), score.overall, self.recording.copy())
         print(f"Eval: accuracy={score.accuracy:.3f} rel={score.relative_timing:.3f} abs={score.absolute_timing:.3f} -> score={score.overall:.3f}")
         if score.overall > 0.95 and self.teacher.auto_advance:
             self.teacher.synth.play_success_sound()
@@ -256,9 +267,42 @@ class GuidedTeacher:
         self.guide_text = None
         self._loop_info_before = None
         self.evaluator_history = {}
-        self._state_file = STATE_FILE
+        self._save_root = SAVE_ROOT
+        self._save_zip = SAVE_ZIP
+        self._unzipped_this_run = False
+        self._last_save_time = 0
+        self._save_lock = threading.Lock()
         self.analytics_popup = AnalyticsPopup(self)
+        self._ensure_unzipped()
+        atexit.register(self._zip_on_exit)
         self.load_state()
+
+    def _ensure_unzipped(self):
+        if os.path.exists(self._save_zip):
+            if os.path.exists(self._save_root):
+                shutil.rmtree(self._save_root)
+            with zipfile.ZipFile(self._save_zip, 'r') as zip_ref:
+                zip_ref.extractall(self._save_root)
+            self._unzipped_this_run = True
+
+    def _zip_on_exit(self):
+        if os.path.exists(self._save_root):
+            with zipfile.ZipFile(self._save_zip, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for root, dirs, files in os.walk(self._save_root):
+                    for file in files:
+                        abs_path = os.path.join(root, file)
+                        rel_path = os.path.relpath(abs_path, self._save_root)
+                        zipf.write(abs_path, rel_path)
+            shutil.rmtree(self._save_root)
+
+    def _get_section_path(self, measure_idx, section_idx):
+        return os.path.join(self._save_root, f"measure_{measure_idx}", f"section_{section_idx}")
+
+    def _get_pass_path(self, measure_idx, section_idx, pass_idx):
+        return os.path.join(self._get_section_path(measure_idx, section_idx), f"pass_{pass_idx}")
+
+    def _get_state_path(self):
+        return os.path.join(self._save_root, 'state.json')
 
     def get_last_score(self):
         return self.last_score
@@ -327,7 +371,7 @@ class GuidedTeacher:
             self.tasks.append(PracticeTransitionTask(self, measure_index, measure_index + 1))
             # TODO: if its the last one let the use play the whole song and evaluate it and based on the evaluation add more tasks to practice specific areas
         self.tasks.append(GenerateNextMeasureTasks(self))
-        self.save_state()
+        self.save_state(force=True)
 
     def next_task(self):
         if self.current_task:
@@ -340,7 +384,7 @@ class GuidedTeacher:
         else:
             self.current_task = None
             self.stop()
-        self.save_state()
+        self.save_state(force=True)
 
     def previous_task(self):
         if self.history:
@@ -349,7 +393,7 @@ class GuidedTeacher:
                 self.tasks.insert(0, self.current_task)
             self.current_task = self.history.pop()
             self.current_task.on_start()
-        self.save_state()
+        self.save_state(force=True)
 
     def split_measure_into_sections(self, measure_index):
         measure_chords, measure_times, measure_xs, _, (measure_start_index, _) = self.midi_teacher.get_notes_for_measure(measure_index)
@@ -410,7 +454,6 @@ class GuidedTeacher:
             'current_task': None,
             'last_score': self.last_score,
             'guide_text': self.guide_text,
-            'evaluator_history': self.evaluator_history,
         }
 
     def from_dict(self, d):
@@ -442,20 +485,55 @@ class GuidedTeacher:
         self.current_task = dict_to_task(d.get('current_task'))
         self.last_score = d.get('last_score', 0.0)
         self.guide_text = d.get('guide_text', None)
-        self.evaluator_history = d.get('evaluator_history', {})
 
-    def save_state(self):
-        try:
-            with open(self._state_file, 'w') as f:
-                json.dump(self.to_dict(), f, indent=2, default=str)
-        except Exception as e:
-            print(f"Failed to save state: {e}")
+    def save_state(self, force=False):
+        now = time.time()
+        if not force and now - self._last_save_time < SAVE_THROTTLE_SECONDS:
+            return
+        with self._save_lock:
+            os.makedirs(self._save_root, exist_ok=True)
+            try:
+                with open(self._get_state_path(), 'w') as f:
+                    json.dump(self.to_dict(), f, indent=2, default=str)
+                self._last_save_time = now
+            except Exception as e:
+                print(f"Failed to save state: {e}")
 
     def load_state(self):
-        if os.path.exists(self._state_file):
+        state_path = self._get_state_path()
+        if os.path.exists(state_path):
             try:
-                with open(self._state_file, 'r') as f:
+                with open(state_path, 'r') as f:
                     d = json.load(f)
                 self.from_dict(d)
             except Exception as e:
                 print(f"Failed to load state: {e}")
+
+    def save_pass(self, measure_idx, section_idx, pass_idx, analytics, score, recording):
+        section_path = self._get_section_path(measure_idx, section_idx)
+        os.makedirs(section_path, exist_ok=True)
+        pass_path = self._get_pass_path(measure_idx, section_idx, pass_idx)
+        with open(pass_path + '.json', 'w') as f:
+            json.dump({'analytics': analytics, 'score': score}, f, indent=2, default=str)
+        if recording is not None and isinstance(recording, mido.MidiTrack):
+            mid = mido.MidiFile()
+            mid.tracks.append(recording)
+            mid.save(pass_path + '.mid')
+
+    def load_pass(self, measure_idx, section_idx, pass_idx):
+        pass_path = self._get_pass_path(measure_idx, section_idx, pass_idx)
+        analytics, score, recording = None, None, None
+        try:
+            with open(pass_path + '.json', 'r') as f:
+                d = json.load(f)
+                analytics = d.get('analytics')
+                score = d.get('score')
+        except Exception:
+            pass
+        try:
+            mid = mido.MidiFile(pass_path + '.mid')
+            if mid.tracks:
+                recording = mid.tracks[0]
+        except Exception:
+            pass
+        return analytics, score, recording
