@@ -15,7 +15,6 @@ LOWEST_NOTE = 21   # A0
 HIGHEST_NOTE = 108 # C8
 TOTAL_KEYS = HIGHEST_NOTE - LOWEST_NOTE + 1
 SOUNDFONT_PATH = "/home/u200b/Music/Sound fonts/GeneralUser-GS.sf2"
-MIDI_TEACH_PATH = "/home/u200b/Music/Credits Song For My Death.mid"
 
 pygame.init()
 info = pygame.display.Info()
@@ -81,7 +80,7 @@ font_medium = pygame.font.SysFont("Segoe UI", 20, bold=True)
 save_system = SaveSystem()
 save_system.unzip_on_start()
 
-midi_path = save_system.load_midi_path() or MIDI_TEACH_PATH
+midi_path = save_system.load_midi_path() or input("Enter path to MIDI file: ").strip()
 
 def render():
     global last_time_ms, piano_y_current, piano_y_target, overlay_alpha_current, overlay_alpha_target, sheet_alpha_current, sheet_alpha_target

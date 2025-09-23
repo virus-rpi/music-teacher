@@ -40,7 +40,7 @@ Help is appreciated!
 - Python 3.13+
 - uv package manager
 - A SoundFont file (e.g., GeneralUser-GS.sf2)
-- A MIDI file to teach (the default path can be changed in `main.py`)
+- A MIDI file to teach
 - A MIDI output-capable keyboard
 
 Install dependencies:
@@ -51,12 +51,13 @@ uv sync
 ### Running the Application
 
 1. Place your SoundFont and MIDI files in accessible locations.
-2. Edit `main.py` to set the correct paths for `SOUNDFONT_PATH` and `MIDI_TEACH_PATH`.
+2. Edit `main.py` to set the correct paths for `SOUNDFONT_PATH`.
 3. Connect your MIDI keyboard.
 4. Run the application:
    ```bash
    uv run main.py
    ```
+5. Enter the path to your MIDI file when prompted (will be copied into the save file)
 
 ### Controls
 
