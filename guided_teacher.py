@@ -270,6 +270,7 @@ class GuidedTeacher:
         self.save_system = save_system or SaveSystem()
         self._save_root = os.path.join(self.save_system.save_root, self.save_system.guided_teacher_data_dir)
         self._unzipped_this_run = False
+        self.pass_index = {}
         self.save_system.unzip_on_start()
         self.load_state()
 
@@ -359,7 +360,6 @@ class GuidedTeacher:
     def generate_tasks_for_measure(self, measure_index):
         self.tasks.clear()
         self.measure_sections = self.split_measure_into_sections(measure_index)
-
         self.tasks.append(PlaybackMeasureTask(self, measure_index))
         for section in self.measure_sections:
             self.tasks.append(PracticeSectionTask(self, section, measure_index))
@@ -451,6 +451,7 @@ class GuidedTeacher:
             'current_task': None,
             'last_score': self.last_score,
             'guide_text': self.guide_text,
+            'pass_index': self.pass_index,
         }
 
     def from_dict(self, d):
@@ -482,17 +483,22 @@ class GuidedTeacher:
         self.current_task = dict_to_task(d.get('current_task'))
         self.last_score = d.get('last_score', 0.0)
         self.guide_text = d.get('guide_text', None)
+        self.pass_index = d.get('pass_index', {})
 
     def save_pass(self, measure_idx, section_idx, pass_idx, analytics, score, recording):
         section_path = self.get_section_path(measure_idx, section_idx)
         os.makedirs(section_path, exist_ok=True)
         pass_path = self._get_pass_path(measure_idx, section_idx, pass_idx)
         with open(pass_path + '.json', 'w') as f:
-            json.dump({'analytics': analytics, 'score': score}, f, indent=2, default=str)
+            json.dump({'analytics': analytics, 'score': score, 'timestamp': time.time()}, f, indent=2, default=str)
         if recording is not None and isinstance(recording, mido.MidiTrack):
             mid = mido.MidiFile()
             mid.tracks.append(recording)
             mid.save(pass_path + '.mid')
+        measure_key = str(measure_idx)
+        section_key = str(section_idx)
+        self.pass_index[measure_key] = self.pass_index.get(measure_key, {})
+        self.pass_index[measure_key][section_key] = self.pass_index[measure_key].get(section_key, 0) + 1
 
     def load_pass(self, measure_idx, section_idx, pass_idx):
         pass_path = self._get_pass_path(measure_idx, section_idx, pass_idx)
@@ -511,4 +517,3 @@ class GuidedTeacher:
         except (FileNotFoundError, mido.KeySignatureError):
             print(f"Failed to load recording for pass {pass_idx}")
         return analytics, score, recording
-
