@@ -41,6 +41,10 @@ class AnalyticsPopup:
         self._selected_section = None
         self._selected_pass = None
 
+        self._x_measure = None
+        self._x_section = None
+        self._x_pass = None
+
     def toggle(self):
         self.visible = not self.visible
         if self.visible:
@@ -104,6 +108,7 @@ class AnalyticsPopup:
             container=container
         )
         curr_x += 260 + 8
+        self._x_measure = curr_x
         measure_options = [f"Measure {m}" for m in sorted(self.pass_map.keys(), key=int)] if self.pass_map else ['—']
         starting_measure = f"Measure {self._selected_measure}" if self._selected_measure else measure_options[0]
         self.dd_measure = pygame_gui.elements.UIDropDownMenu(
@@ -114,16 +119,18 @@ class AnalyticsPopup:
             container=container
         )
         curr_x += 160 + 8
+        self._x_section = curr_x
         section_options = [f"Section {s}" for s in sorted(self.pass_map[self._selected_measure].keys())] if self._selected_measure is not None and self.pass_map.get(self._selected_measure) else ['—']
         starting_section = f"Section {self._selected_section}" if self._selected_section else section_options[0]
         self.dd_section = pygame_gui.elements.UIDropDownMenu(
             options_list=section_options,
             starting_option=starting_section,
-            relative_rect=pygame.Rect(curr_x, curr_y, 140, 28),
+            relative_rect=pygame.Rect(curr_x, curr_y, 180, 28),
             manager=self.ui_manager,
             container=container
         )
-        curr_x += 140 + 8
+        curr_x += 180 + 8
+        self._x_pass = curr_x
         pass_options = [f"Pass {p}" for p in sorted(self.pass_map[self._selected_measure][self._selected_section].keys())] if self._selected_measure is not None and self._selected_section is not None and self.pass_map.get(self._selected_measure, {}).get(self._selected_section) else ['—']
         starting_pass = f"Pass {self._selected_pass}" if self._selected_pass else pass_options[0]
         self.dd_pass = pygame_gui.elements.UIDropDownMenu(
@@ -169,7 +176,7 @@ class AnalyticsPopup:
             self.pass_map[self._selected_measure].keys())] if self._selected_measure is not None and self.pass_map.get(
             self._selected_measure) else ['—']
         starting_section = f"Section {self._selected_section}" if self._selected_section else section_options[0]
-        rect = pygame.Rect(self.dd_measure.rect.right + 8 - self.window.rect.x, self.dd_measure.rect.y - self.window.rect.y, 140, 28)
+        rect = pygame.Rect(self._x_section, 24, 180, 28)
         self.dd_section = pygame_gui.elements.UIDropDownMenu(
             options_list=section_options,
             starting_option=starting_section,
@@ -186,7 +193,7 @@ class AnalyticsPopup:
             self._selected_section].keys()]) if self._selected_measure is not None and self._selected_section is not None and self.pass_map.get(
             self._selected_measure, {}).get(self._selected_section) else ['—']
         starting_pass = f"Pass {self._selected_pass}" if self._selected_pass else pass_options[0]
-        rect = pygame.Rect(self.dd_section.rect.right + 8 - self.window.rect.x, self.dd_section.rect.y - self.window.rect.y, 120, 28)
+        rect = pygame.Rect(self._x_pass, 24, 120, 28)
         self.dd_pass = pygame_gui.elements.UIDropDownMenu(
             options_list=pass_options,
             starting_option=starting_pass,
@@ -204,7 +211,7 @@ class AnalyticsPopup:
                 selected = self.dd_measure.selected_option[0]
                 m = re.match(r'Measure (\d+)', selected)
                 if m:
-                    self._selected_measure = m.group(1)
+                    self._selected_measure = int(m.group(1))
                     sections = sorted(self.pass_map[self._selected_measure].keys())
                     self._selected_section = sections[0] if sections else None
                     passes = list(self.pass_map[self._selected_measure][self._selected_section].keys()) if self._selected_section is not None else []
@@ -229,6 +236,7 @@ class AnalyticsPopup:
 
     def _get_selected_analytics(self):
         with self.save_system.guided_teacher_data as s:
+            print(f"Loading measure {self._selected_measure}, section {self._selected_section}, pass {self._selected_pass} from {self.pass_map[self._selected_measure][self._selected_section][self._selected_pass]}")
             raw = json.loads(s.load_file(self.pass_map[self._selected_measure][self._selected_section][self._selected_pass]))
             analytics = raw.get('analytics', {})
             return analytics
