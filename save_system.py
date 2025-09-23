@@ -19,9 +19,9 @@ class ModuleData:
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass
 
-    def save_state(self, state_json):
+    def save_state(self, state_dir):
         with open(self.state_path, 'w', encoding='utf-8') as f:
-            json.dump(state_json, f, indent=2)
+            json.dump(state_dir, f, indent=2)
 
     def load_state(self):
         if os.path.exists(self.state_path):
@@ -68,7 +68,8 @@ class ModuleData:
         if not isinstance(relative_path, str):
             raise TypeError("relative_path must be str, not {}".format(type(relative_path).__name__))
         path = self.data_dir / relative_path
-        path.mkdir(parents=True, exist_ok=True)
+        if not path.exists() and not path.suffix:
+            path.mkdir(parents=True, exist_ok=True)
         return path
 
 class SaveSystem:
@@ -128,18 +129,3 @@ class SaveSystem:
     def load_midi_path(self):
         midi_path = os.path.join(self.save_root, self.midi_filename)
         return midi_path if os.path.exists(midi_path) else None
-
-    def save_guided_teacher_state(self, midi_teacher_index, extra_state=None):
-        state = {'midi_teacher_index': midi_teacher_index}
-        if extra_state:
-            state.update(extra_state)
-        os.makedirs(self.save_root, exist_ok=True)
-        with open(os.path.join(self.save_root, self.guided_teacher_data_dir, 'state.json'), 'w', encoding='utf-8') as f:
-            json.dump(state, f)
-
-    def load_guided_teacher_state(self):
-        state_path = os.path.join(self.save_root, self.guided_teacher_data_dir, 'state.json')
-        if os.path.exists(state_path):
-            with open(state_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        return {}

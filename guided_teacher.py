@@ -194,9 +194,7 @@ class PracticeSectionTask(Task):
         else:
             section_idx = next((i for i, sec in enumerate(self.teacher.split_measure_into_sections(self.measure)) if sec.start_idx == self.section.start_idx and sec.end_idx == self.section.end_idx), None)
         if section_idx is not None:
-            section_path = self.teacher.get_section_path(self.measure, section_idx)
-            os.makedirs(section_path, exist_ok=True)
-            pass_idx = len([f for f in os.listdir(section_path) if f.startswith('pass_') and f.endswith('.json')])
+            pass_idx = self.teacher.pass_index.get(str(self.measure), {}).get(str(section_idx), 0)
             self.teacher.save_pass(self.measure, section_idx, pass_idx, getattr(evaluator, 'analytics', {}), evaluator.score.overall,
                                    self.recording.copy())
         else:
@@ -267,18 +265,11 @@ class GuidedTeacher:
         self.analytics_popup = AnalyticsPopup(self)
         self._save_lock = threading.Lock()
         self._last_save_time = 0
-        self.save_system = save_system or SaveSystem()
-        self._save_root = os.path.join(self.save_system.save_root, self.save_system.guided_teacher_data_dir)
+        self.save_system = save_system.guided_teacher_data
+        self._save_root = os.path.join(save_system.save_root, save_system.guided_teacher_data_dir)
         self._unzipped_this_run = False
         self.pass_index = {}
-        self.save_system.unzip_on_start()
         self.load_state()
-
-    def get_section_path(self, measure_idx, section_idx):
-        return os.path.join(self._save_root, f"measure_{measure_idx}", f"section_{section_idx}")
-
-    def _get_pass_path(self, measure_idx, section_idx, pass_idx):
-        return os.path.join(self.get_section_path(measure_idx, section_idx), f"pass_{pass_idx}")
 
     def save_state(self, force=False):
         now = time.time()
@@ -289,13 +280,14 @@ class GuidedTeacher:
             try:
                 state_dict = self.to_dict()
                 state_dict['midi_teacher_index'] = self.midi_teacher.get_current_index()
-                self.save_system.save_guided_teacher_state(self.midi_teacher.get_current_index(), state_dict)
+                with self.save_system as s:
+                    s.save_state(state_dict)
                 self._last_save_time = now
             except Exception as e:
                 print(f"Failed to save state: {e}")
 
     def load_state(self):
-        state = self.save_system.load_guided_teacher_state()
+        state = self.save_system.load_state()
         if state:
             self.from_dict(state)
             idx = state.get('midi_teacher_index')
@@ -486,34 +478,31 @@ class GuidedTeacher:
         self.pass_index = d.get('pass_index', {})
 
     def save_pass(self, measure_idx, section_idx, pass_idx, analytics, score, recording):
-        section_path = self.get_section_path(measure_idx, section_idx)
-        os.makedirs(section_path, exist_ok=True)
-        pass_path = self._get_pass_path(measure_idx, section_idx, pass_idx)
-        with open(pass_path + '.json', 'w') as f:
-            json.dump({'analytics': analytics, 'score': score, 'timestamp': time.time()}, f, indent=2, default=str)
-        if recording is not None and isinstance(recording, mido.MidiTrack):
-            mid = mido.MidiFile()
-            mid.tracks.append(recording)
-            mid.save(pass_path + '.mid')
+        with self.save_system as s:
+            s.save_file(f"measure_{measure_idx}/section_{section_idx}/pass_{pass_idx}.json", json.dumps({'analytics': analytics, 'score': score, 'timestamp': time.time()}, indent=2, default=str))
+            if recording is not None and isinstance(recording, mido.MidiTrack):
+                mid = mido.MidiFile()
+                mid.tracks.append(recording)
+                mid.save(s.get_absolute_path(f"measure_{measure_idx}/section_{section_idx}/pass_{pass_idx}.mid"))
         measure_key = str(measure_idx)
         section_key = str(section_idx)
         self.pass_index[measure_key] = self.pass_index.get(measure_key, {})
         self.pass_index[measure_key][section_key] = self.pass_index[measure_key].get(section_key, 0) + 1
 
     def load_pass(self, measure_idx, section_idx, pass_idx):
-        pass_path = self._get_pass_path(measure_idx, section_idx, pass_idx)
         analytics, score, recording = None, None, None
-        try:
-            with open(pass_path + '.json', 'r') as f:
-                d = json.load(f)
-                analytics = d.get('analytics')
-                score = d.get('score')
-        except (FileNotFoundError, json.JSONDecodeError):
-            print(f"Failed to load pass {pass_idx}")
-        try:
-            mid = mido.MidiFile(pass_path + '.mid')
-            if mid.tracks:
-                recording = mid.tracks[0]
-        except (FileNotFoundError, mido.KeySignatureError):
-            print(f"Failed to load recording for pass {pass_idx}")
+        with self.save_system as s:
+            try:
+                d = json.loads(s.load_file(f"measure_{measure_idx}/section_{section_idx}/pass_{pass_idx}.json"))
+                if d:
+                    analytics = d.get('analytics')
+                    score = d.get('score')
+            except (FileNotFoundError, json.JSONDecodeError):
+                print(f"Failed to load pass {pass_idx}")
+            try:
+                mid = mido.MidiFile(s.get_absolute_path(f"measure_{measure_idx}/section_{section_idx}/pass_{pass_idx}.mid"))
+                if mid.tracks:
+                    recording = mid.tracks[0]
+            except (FileNotFoundError, mido.KeySignatureError):
+                print(f"Failed to load recording for pass {pass_idx}")
         return analytics, score, recording
