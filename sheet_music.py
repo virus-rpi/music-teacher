@@ -7,17 +7,19 @@ from typing import Optional
 import cairosvg
 import json
 import xml.etree.ElementTree as ElementTree
+from save_system import SaveSystem
 
 _resampling = getattr(Image, "Resampling", Image)
 RESAMPLE_LANCZOS = getattr(_resampling, "LANCZOS", getattr(_resampling, "BICUBIC", getattr(Image, "NEAREST", 0)))
 _CAIROSVG_DPI = 1200
 
 class SheetMusicRenderer:
-    def __init__(self, midi_path: str | Path, screen_width: int, height: int = 260, debug: bool = False) -> None:
+    def __init__(self, midi_path: str | Path, screen_width: int, height: int = 260, debug: bool = False, save_system: SaveSystem = None) -> None:
         self.midi_path = Path(midi_path)
         self.screen_width = int(screen_width)
         self.strip_height = int(height)
         self.debug = debug
+        self.save_system = save_system or SaveSystem()
 
         self.full_surface: Optional[pygame.Surface] = None
         self.full_width: int = 0
@@ -36,26 +38,14 @@ class SheetMusicRenderer:
 
         self._prepare_strip()
 
-    @staticmethod
-    def _get_cache_dir() -> Path:
-        cache_dir = Path(".sheet_music_cache")
-        cache_dir.mkdir(exist_ok=True)
+    def _get_cache_dir(self) -> Path:
+        cache_dir = Path(self.save_system.load_sheet_music_cache())
+        cache_dir.mkdir(parents=True, exist_ok=True)
         return cache_dir
 
-    def _midi_cache_key(self) -> str:
-        try:
-            stat = self.midi_path.stat()
-            mtime = int(stat.st_mtime)
-            size = stat.st_size
-        except (OSError, AttributeError):
-            mtime = 0
-            size = 0
-        key = f"{self.midi_path.name}_{mtime}_{size}"
-        return key
-
-    def _load_cache_data(self, cache_subdir: Path) -> None:
-        note_xs_cache = cache_subdir / "note_xs.json"
-        measure_data_cache = cache_subdir / "measure_data.json"
+    def _load_cache_data(self, cache_dir: Path) -> None:
+        note_xs_cache = cache_dir / "note_xs.json"
+        measure_data_cache = cache_dir / "measure_data.json"
 
         if note_xs_cache.exists():
             try:
@@ -80,14 +70,14 @@ class SheetMusicRenderer:
                 print(f"SheetMusicRenderer: failed to load measure data cache: {e}")
                 self.measure_data = []
 
-    def _call_midi_to_svg(self, cache_subdir: Path, svg_out: Path) -> None:
-        note_xs_cache = cache_subdir / "note_xs.json"
-        measure_data_cache = cache_subdir / "measure_data.json"
+    def _call_midi_to_svg(self, cache_dir: Path, svg_out: Path) -> None:
+        note_xs_cache = cache_dir / "note_xs.json"
+        measure_data_cache = cache_dir / "measure_data.json"
         try:
             try:
-                res_note_xs, res_measure_data = midi_to_svg(str(self.midi_path), str(cache_subdir))
+                res_note_xs, res_measure_data = midi_to_svg(str(self.midi_path), str(cache_dir))
             except TypeError:
-                res_note_xs, res_measure_data = midi_to_svg(str(self.midi_path), str(cache_subdir), "mscore")
+                res_note_xs, res_measure_data = midi_to_svg(str(self.midi_path), str(cache_dir), "mscore")
             
             self.measure_data = res_measure_data
             if isinstance(res_note_xs, list):
@@ -102,7 +92,6 @@ class SheetMusicRenderer:
             if isinstance(res_measure_data, list):
                 try:
                     with measure_data_cache.open("w", encoding="utf-8") as fh:
-                        # Save as list of (start_x, end_x, n_notes)
                         serializable_measure_data = []
                         for tup in res_measure_data:
                             if tup is not None and len(tup) == 3:
@@ -119,7 +108,7 @@ class SheetMusicRenderer:
             return
 
         if not svg_out.exists():
-            svgs = list(cache_subdir.glob(f"{self.midi_path.stem}*.svg"))
+            svgs = list(cache_dir.glob(f"{self.midi_path.stem}*.svg"))
             if svgs:
                 svg_out = svgs[0]
 
@@ -239,21 +228,17 @@ class SheetMusicRenderer:
 
     def _prepare_strip(self) -> None:
         cache_dir = self._get_cache_dir()
-        cache_key = self._midi_cache_key()
-        cache_subdir = cache_dir / cache_key
-        cache_subdir.mkdir(parents=True, exist_ok=True)
+        cache_dir.mkdir(parents=True, exist_ok=True)
 
-        strip_png = cache_subdir / "strip.png"
-        svg_out = cache_subdir / f"{self.midi_path.stem}.svg"
-        note_xs_cache = cache_subdir / "note_xs.json"
-        measure_data_cache = cache_subdir / "measure_data.json"
+        strip_png = cache_dir / "strip.png"
+        svg_out = cache_dir / "song.svg"
 
-        self._load_cache_data(cache_subdir)
+        self._load_cache_data(cache_dir)
 
         if not strip_png.exists() or not self.notehead_xs or not self.measure_data:
-            self._call_midi_to_svg(cache_subdir, svg_out)
+            self._call_midi_to_svg(cache_dir, svg_out)
             if not svg_out.exists():
-                svgs = list(cache_subdir.glob(f"{self.midi_path.stem}*.svg"))
+                svgs = list(cache_dir.glob("song*.svg"))
                 if svgs:
                     svg_out = svgs[0]
             if not svg_out.exists():

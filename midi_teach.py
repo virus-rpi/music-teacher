@@ -1,10 +1,12 @@
 import mido
 from sheet_music import SheetMusicRenderer
+from save_system import SaveSystem
 
 
 class MidiTeacher:
-    def __init__(self, midi_path, sheet_music_renderer: SheetMusicRenderer):
-        self.midi_path = midi_path
+    def __init__(self, midi_path, sheet_music_renderer: SheetMusicRenderer, save_system: SaveSystem = None):
+        self.save_system = save_system or SaveSystem()
+        self.midi_path = self.save_system.load_midi_path() or midi_path
         self.sheet_music_renderer = sheet_music_renderer
         self.chords, self.chord_times = self._extract_chords()
         self._current_index = 0

@@ -7,7 +7,9 @@ from synth import Synth, PEDAL_CC
 from midi_teach import MidiTeacher
 from sheet_music import SheetMusicRenderer
 from guided_teacher import GuidedTeacher
+from save_system import SaveSystem
 import math
+import atexit
 
 LOWEST_NOTE = 21   # A0
 HIGHEST_NOTE = 108 # C8
@@ -76,6 +78,11 @@ dims = {
 font_small = pygame.font.SysFont("Segoe UI", 16)
 font_medium = pygame.font.SysFont("Segoe UI", 20, bold=True)
 
+save_system = SaveSystem()
+save_system.unzip_on_start()
+
+midi_path = save_system.load_midi_path() or MIDI_TEACH_PATH
+
 def render():
     global last_time_ms, piano_y_current, piano_y_target, overlay_alpha_current, overlay_alpha_target, sheet_alpha_current, sheet_alpha_target
     now_ms = pygame.time.get_ticks()
@@ -108,9 +115,9 @@ def render():
 
 
 synth = Synth(SOUNDFONT_PATH, render)
-sheet_music_renderer = SheetMusicRenderer(MIDI_TEACH_PATH, SCREEN_WIDTH)
-midi_teacher = MidiTeacher(MIDI_TEACH_PATH, sheet_music_renderer)
-guided_teacher = GuidedTeacher(midi_teacher, synth)
+sheet_music_renderer = SheetMusicRenderer(midi_path, SCREEN_WIDTH, save_system=save_system)
+midi_teacher = MidiTeacher(midi_path, sheet_music_renderer, save_system=save_system)
+guided_teacher = GuidedTeacher(midi_teacher, synth, save_system=save_system)
 
 def midi_listener():
     try:
@@ -159,6 +166,13 @@ def midi_listener():
 
 midi_thread = threading.Thread(target=midi_listener, daemon=True)
 midi_thread.start()
+
+def save_all():
+    save_system.save_midi(midi_path)
+    guided_teacher.save_state(force=True)
+    save_system.zip_on_exit()
+
+atexit.register(save_all)
 
 running = True
 while running:

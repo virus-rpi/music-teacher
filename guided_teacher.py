@@ -11,13 +11,9 @@ import json
 import os
 from analytics_popup import AnalyticsPopup
 import threading
-import zipfile
-import shutil
-import atexit
+from save_system import SaveSystem
 
 CHORDS_PER_SECTION = (3, 4)
-SAVE_ROOT = 'guided_teacher_save'
-SAVE_ZIP = 'guided_teacher_save.mtsf' # music teacher save file
 SAVE_THROTTLE_SECONDS = 2.0
 
 @dataclass(frozen=True)
@@ -252,7 +248,7 @@ class GenerateNextMeasureTasks(Task):
         pass
 
 class GuidedTeacher:
-    def __init__(self, midi_teacher: MidiTeacher, synth: Synth):
+    def __init__(self, midi_teacher: MidiTeacher, synth: Synth, save_system: SaveSystem = None):
         self._section_progress = None
         self.midi_teacher = midi_teacher
         self.synth = synth
@@ -268,33 +264,14 @@ class GuidedTeacher:
         self.guide_text = None
         self._loop_info_before = None
         self.evaluator_history = {}
-        self._save_root = SAVE_ROOT
-        self._save_zip = SAVE_ZIP
-        self._unzipped_this_run = False
-        self._last_save_time = 0
-        self._save_lock = threading.Lock()
         self.analytics_popup = AnalyticsPopup(self)
-        self._ensure_unzipped()
-        atexit.register(self._zip_on_exit)
+        self._save_lock = threading.Lock()
+        self._last_save_time = 0
+        self.save_system = save_system or SaveSystem()
+        self._save_root = os.path.join(self.save_system.save_root, self.save_system.guided_teacher_data_dir)
+        self._unzipped_this_run = False
+        self.save_system.unzip_on_start()
         self.load_state()
-
-    def _ensure_unzipped(self):
-        if os.path.exists(self._save_zip):
-            if os.path.exists(self._save_root):
-                shutil.rmtree(self._save_root)
-            with zipfile.ZipFile(self._save_zip, 'r') as zip_ref:
-                zip_ref.extractall(self._save_root)
-            self._unzipped_this_run = True
-
-    def _zip_on_exit(self):
-        if os.path.exists(self._save_root):
-            with zipfile.ZipFile(self._save_zip, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for root, dirs, files in os.walk(self._save_root):
-                    for file in files:
-                        abs_path = os.path.join(root, file)
-                        rel_path = os.path.relpath(abs_path, self._save_root)
-                        zipf.write(abs_path, rel_path)
-            shutil.rmtree(self._save_root)
 
     def get_section_path(self, measure_idx, section_idx):
         return os.path.join(self._save_root, f"measure_{measure_idx}", f"section_{section_idx}")
@@ -302,8 +279,27 @@ class GuidedTeacher:
     def _get_pass_path(self, measure_idx, section_idx, pass_idx):
         return os.path.join(self.get_section_path(measure_idx, section_idx), f"pass_{pass_idx}")
 
-    def _get_state_path(self):
-        return os.path.join(self._save_root, 'state.json')
+    def save_state(self, force=False):
+        now = time.time()
+        if not force and now - self._last_save_time < SAVE_THROTTLE_SECONDS:
+            return
+        with self._save_lock:
+            os.makedirs(self._save_root, exist_ok=True)
+            try:
+                state_dict = self.to_dict()
+                state_dict['midi_teacher_index'] = self.midi_teacher.get_current_index()
+                self.save_system.save_guided_teacher_state(self.midi_teacher.get_current_index(), state_dict)
+                self._last_save_time = now
+            except Exception as e:
+                print(f"Failed to save state: {e}")
+
+    def load_state(self):
+        state = self.save_system.load_guided_teacher_state()
+        if state:
+            self.from_dict(state)
+            idx = state.get('midi_teacher_index')
+            if idx is not None:
+                self.midi_teacher.seek_to_index(idx)
 
     def get_last_score(self):
         return self.last_score
@@ -486,29 +482,6 @@ class GuidedTeacher:
         self.current_task = dict_to_task(d.get('current_task'))
         self.last_score = d.get('last_score', 0.0)
         self.guide_text = d.get('guide_text', None)
-
-    def save_state(self, force=False):
-        now = time.time()
-        if not force and now - self._last_save_time < SAVE_THROTTLE_SECONDS:
-            return
-        with self._save_lock:
-            os.makedirs(self._save_root, exist_ok=True)
-            try:
-                with open(self._get_state_path(), 'w') as f:
-                    json.dump(self.to_dict(), f, indent=2, default=str)
-                self._last_save_time = now
-            except Exception as e:
-                print(f"Failed to save state: {e}")
-
-    def load_state(self):
-        state_path = self._get_state_path()
-        if os.path.exists(state_path):
-            try:
-                with open(state_path, 'r') as f:
-                    d = json.load(f)
-                self.from_dict(d)
-            except Exception as e:
-                print(f"Failed to load state: {e}")
 
     def save_pass(self, measure_idx, section_idx, pass_idx, analytics, score, recording):
         section_path = self.get_section_path(measure_idx, section_idx)
