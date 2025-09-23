@@ -9,7 +9,6 @@ from sheet_music import SheetMusicRenderer
 from guided_teacher import GuidedTeacher
 from save_system import SaveSystem
 import math
-import atexit
 
 LOWEST_NOTE = 21   # A0
 HIGHEST_NOTE = 108 # C8
@@ -77,8 +76,14 @@ dims = {
 font_small = pygame.font.SysFont("Segoe UI", 16)
 font_medium = pygame.font.SysFont("Segoe UI", 20, bold=True)
 
-save_system = SaveSystem()
-save_system.unzip_on_start()
+def save_all():
+    try:
+        save_system.save_midi(midi_path)
+        guided_teacher.save_state(force=True)
+    except Exception as e:
+        print(f"Failed to save state: {e}")
+
+save_system = SaveSystem(before_exit_callback=save_all)
 
 midi_path = save_system.load_midi_path() or input("Enter path to MIDI file: ").strip()
 
@@ -165,13 +170,6 @@ def midi_listener():
 
 midi_thread = threading.Thread(target=midi_listener, daemon=True)
 midi_thread.start()
-
-def save_all():
-    save_system.save_midi(midi_path)
-    guided_teacher.save_state(force=True)
-    save_system.zip_on_exit()
-
-atexit.register(save_all)
 
 running = True
 while running:

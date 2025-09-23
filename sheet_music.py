@@ -8,18 +8,21 @@ import cairosvg
 import json
 import xml.etree.ElementTree as ElementTree
 from save_system import SaveSystem
+import io
 
 _resampling = getattr(Image, "Resampling", Image)
 RESAMPLE_LANCZOS = getattr(_resampling, "LANCZOS", getattr(_resampling, "BICUBIC", getattr(Image, "NEAREST", 0)))
 _CAIROSVG_DPI = 1200
+strip_png = "strip.png"
+strip_svg = "strip.svg"
 
 class SheetMusicRenderer:
-    def __init__(self, midi_path: str | Path, screen_width: int, height: int = 260, debug: bool = False, save_system: SaveSystem = None) -> None:
+    def __init__(self, midi_path: str | Path, screen_width: int, save_system: SaveSystem, height: int = 260, debug: bool = False) -> None:
         self.midi_path = Path(midi_path)
         self.screen_width = int(screen_width)
         self.strip_height = int(height)
         self.debug = debug
-        self.save_system = save_system or SaveSystem()
+        self.save_system = save_system.sheet_music_cache
 
         self.full_surface: Optional[pygame.Surface] = None
         self.full_width: int = 0
@@ -38,41 +41,16 @@ class SheetMusicRenderer:
 
         self._prepare_strip()
 
-    def _get_cache_dir(self) -> Path:
-        cache_dir = Path(self.save_system.load_sheet_music_cache())
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        return cache_dir
-
-    def _load_cache_data(self, cache_dir: Path) -> None:
-        note_xs_cache = cache_dir / "note_xs.json"
-        measure_data_cache = cache_dir / "measure_data.json"
-
-        if note_xs_cache.exists():
-            try:
-                with note_xs_cache.open("r", encoding="utf-8") as fh:
-                    raw = json.load(fh)
-                    self.notehead_xs = [float(x) for x in raw if x is not None]
-            except (json.JSONDecodeError, OSError, ValueError, TypeError):
-                self.notehead_xs = []
-        
-        if measure_data_cache.exists():
-            try:
-                with measure_data_cache.open("r", encoding="utf-8") as fh:
-                    raw_measure_data = json.load(fh)
-                    self.measure_data = []
-                    for tup in raw_measure_data:
-                        if tup is not None and len(tup) == 3:
-                            sx, ex, n = tup
-                            self.measure_data.append((float(sx) if sx is not None else None, float(ex) if ex is not None else None, int(n)))
-                        else:
-                            self.measure_data.append((None, None, 0))
-            except (json.JSONDecodeError, OSError, ValueError, TypeError) as e:
-                print(f"SheetMusicRenderer: failed to load measure data cache: {e}")
-                self.measure_data = []
+    def _load_cache_data(self) -> None:
+        with self.save_system as s:
+            self.notehead_xs = [float(x) for x in json.loads(s.load_file("note_xs.json")) if x is not None] or []
+            self.measure_data = [
+                (float(tup[0]) if tup[0] is not None else None, float(tup[1]) if tup[1] is not None else None, int(tup[2] or 0))
+                if tup is not None and len(tup) == 3 else (None, None, 0)
+                for tup in json.loads(s.load_file("measure_data.json"))
+            ]
 
     def _call_midi_to_svg(self, cache_dir: Path, svg_out: Path) -> None:
-        note_xs_cache = cache_dir / "note_xs.json"
-        measure_data_cache = cache_dir / "measure_data.json"
         try:
             try:
                 res_note_xs, res_measure_data = midi_to_svg(str(self.midi_path), str(cache_dir))
@@ -81,17 +59,17 @@ class SheetMusicRenderer:
             
             self.measure_data = res_measure_data
             if isinstance(res_note_xs, list):
+                self.notehead_xs = [float(x) for x in res_note_xs]
                 try:
-                    with note_xs_cache.open("w", encoding="utf-8") as fh:
-                        json.dump([float(x) for x in res_note_xs], fh)
+                    with self.save_system() as s:
+                        s.save_file("note_xs.json", json.dumps(self.notehead_xs))
                 except (OSError, TypeError, ValueError) as e:
                     print("SheetMusicRenderer: failed to save note x positions:", e)
-                self.notehead_xs = [float(x) for x in res_note_xs]
 
             # Save measure data
             if isinstance(res_measure_data, list):
                 try:
-                    with measure_data_cache.open("w", encoding="utf-8") as fh:
+                    with self.save_system() as s:
                         serializable_measure_data = []
                         for tup in res_measure_data:
                             if tup is not None and len(tup) == 3:
@@ -99,7 +77,7 @@ class SheetMusicRenderer:
                                 serializable_measure_data.append([sx, ex, n])
                             else:
                                 serializable_measure_data.append([None, None, 0])
-                        json.dump(serializable_measure_data, fh)
+                        s.save_file("measure_data.json", json.dumps(serializable_measure_data))
                 except (OSError, TypeError, ValueError) as e:
                     print(f"SheetMusicRenderer: failed to save measure data: {e}")
 
@@ -117,36 +95,38 @@ class SheetMusicRenderer:
             return
 
     @staticmethod
-    def _convert_svg_to_png(svg_out: Path, strip_png: Path) -> bool:
+    def _convert_svg_to_png(svg_out: Path, strip_png_path: Path) -> bool:
         try:
-            cairosvg.svg2png(url=str(svg_out), write_to=str(strip_png), dpi=_CAIROSVG_DPI, scale=2.0, negate_colors=True)
+            cairosvg.svg2png(url=str(svg_out), write_to=str(strip_png_path), dpi=_CAIROSVG_DPI, scale=2.0, negate_colors=True)
             return True
         except (RuntimeError, OSError, ValueError) as e:
             print("Failed to convert SVG to PNG: ", e)
             return False
 
-    def _open_and_process_image(self, strip_png: Path, svg_path: Path) -> tuple[Optional[Image.Image], Optional[float], int, int]:
+    def _open_and_process_image(self) -> tuple[Optional[Image.Image], Optional[float], int, int]:
         """Open PNG, crop whitespace on the left, resize to strip_height.
         Returns (pil_image, svg_width_if_found_or_None, cropped_w, left_crop)
         """
-        try:
-            im = Image.open(str(strip_png)).convert("RGBA")
-        except (FileNotFoundError, OSError, UnidentifiedImageError) as e:
-            print("Failed to open generated PNG:", e)
-            return None, None, 0, 0
-
-        svg_width = None
-        if svg_path.exists():
+        with self.save_system as s:
             try:
-                tree = ElementTree.parse(str(svg_path))
-                root = tree.getroot()
-                w = root.get('width') or root.get('{http://www.w3.org/2000/svg}width')
-                if w:
-                    if isinstance(w, str) and w.endswith('px'):
-                        w = w[:-2]
-                    svg_width = float(w)
-            except (ElementTree.ParseError, OSError, ValueError):
-                svg_width = None
+                im = Image.open(io.BytesIO(s.load_file(strip_png))).convert("RGBA")
+            except (FileNotFoundError, OSError, UnidentifiedImageError) as e:
+                print("Failed to open generated PNG:", e)
+                return None, None, 0, 0
+
+            svg_width = None
+            if s.file_exists(strip_svg):
+                try:
+                    tree = ElementTree.parse(io.BytesIO(s.load_file(strip_svg)))
+                    root = tree.getroot()
+                    w = root.get('width') or root.get('{http://www.w3.org/2000/svg}width')
+                    if w:
+                        if isinstance(w, str) and w.endswith('px'):
+                            w = w[:-2]
+                        svg_width = float(w)
+                except (ElementTree.ParseError, OSError, ValueError) as e:
+                    print("Failed to parse SVG width:", e)
+                    svg_width = None
 
         left_crop = 0
         bbox = ImageOps.invert(im.convert("L")).getbbox()
@@ -186,37 +166,26 @@ class SheetMusicRenderer:
             pxs = sorted(set(pxs))
             self.notehead_xs = pxs
 
-            # Scale measure_data start_x and end_x
             if self.measure_data:
                 scaled_measure_data = []
                 for tup in self.measure_data:
                     if tup is not None and len(tup) == 3:
                         sx, ex, n = tup
-                        if sx is not None:
-                            try:
-                                sx_px = float(sx) * pixels_per_svg_unit
-                                sx_adj_px = sx_px - float(left_crop)
-                                if 0 <= sx_adj_px <= float(cropped_w):
-                                    sx_scaled = int(round(sx_adj_px * final_scale))
-                                else:
-                                    sx_scaled = None
-                            except Exception:
-                                sx_scaled = None
-                        else:
-                            sx_scaled = None
-                        if ex is not None:
-                            try:
-                                ex_px = float(ex) * pixels_per_svg_unit
-                                ex_adj_px = ex_px - float(left_crop)
-                                if 0 <= ex_adj_px <= float(cropped_w):
-                                    ex_scaled = int(round(ex_adj_px * final_scale))
-                                else:
-                                    ex_scaled = None
-                            except Exception:
-                                ex_scaled = None
-                        else:
-                            ex_scaled = None
-                        scaled_measure_data.append((sx_scaled, ex_scaled, int(n)))
+                        scaled = []
+                        for item in [sx, ex]:
+                            if item is not None:
+                                try:
+                                    item_px = float(item) * pixels_per_svg_unit
+                                    item_adj_px = item_px - float(left_crop)
+                                    if 0 <= item_adj_px <= float(cropped_w):
+                                        scaled.append(int(round(item_adj_px * final_scale)))
+                                    else:
+                                        scaled.append(None)
+                                except (TypeError, ValueError):
+                                    scaled.append(None)
+                            else:
+                                scaled.append(None)
+                        scaled_measure_data.append((scaled[0], scaled[1], int(n)))
                     else:
                         scaled_measure_data.append((None, None, 0))
                 self.measure_data = scaled_measure_data
@@ -227,33 +196,24 @@ class SheetMusicRenderer:
             self.measure_data = []
 
     def _prepare_strip(self) -> None:
-        cache_dir = self._get_cache_dir()
-        cache_dir.mkdir(parents=True, exist_ok=True)
+        with self.save_system as s:
+            cache_dir = s.get_absolute_path()
+            self._load_cache_data()
 
-        strip_png = cache_dir / "strip.png"
-        svg_out = cache_dir / "song.svg"
+            if not s.file_exists(strip_png) or not self.notehead_xs or not self.measure_data:
+                self._call_midi_to_svg(cache_dir, s.get_absolute_path(strip_svg))
+                if not s.file_exists(strip_svg):
+                    raise RuntimeError("No SVG produced by sheet_music_renderer; aborting strip preparation.")
+                ok = self._convert_svg_to_png(s.get_absolute_path(strip_svg), s.get_absolute_path(strip_png))
+                if not ok:
+                    return
 
-        self._load_cache_data(cache_dir)
-
-        if not strip_png.exists() or not self.notehead_xs or not self.measure_data:
-            self._call_midi_to_svg(cache_dir, svg_out)
-            if not svg_out.exists():
-                svgs = list(cache_dir.glob("song*.svg"))
-                if svgs:
-                    svg_out = svgs[0]
-            if not svg_out.exists():
-                return
-
-            ok = self._convert_svg_to_png(svg_out, strip_png)
-            if not ok:
-                return
-
-        strip_resized, svg_width, cropped_w, left_crop = self._open_and_process_image(strip_png, svg_out)
+        strip_resized, svg_width, cropped_w, left_crop = self._open_and_process_image()
         if strip_resized is None:
             return
         try:
             data = strip_resized.tobytes()
-            self.full_surface = pygame.image.fromstring(data, strip_resized.size, "RGBA").convert_alpha()
+            self.full_surface = pygame.image.frombytes(data, strip_resized.size, "RGBA").convert_alpha()
         except (pygame.error, ValueError, TypeError) as e:
             print("Failed to create pygame surface from strip image:", e)
             return
