@@ -14,7 +14,7 @@ _resampling = getattr(Image, "Resampling", Image)
 RESAMPLE_LANCZOS = getattr(_resampling, "LANCZOS", getattr(_resampling, "BICUBIC", getattr(Image, "NEAREST", 0)))
 _CAIROSVG_DPI = 1200
 strip_png = "strip.png"
-strip_svg = "strip.svg"
+song_svg = "song.svg"
 
 class SheetMusicRenderer:
     def __init__(self, midi_path: str | Path, screen_width: int, save_system: SaveSystem, height: int = 260, debug: bool = False) -> None:
@@ -43,12 +43,12 @@ class SheetMusicRenderer:
 
     def _load_cache_data(self) -> None:
         with self.save_system as s:
-            self.notehead_xs = [float(x) for x in json.loads(s.load_file("note_xs.json")) if x is not None] or []
+            self.notehead_xs = [float(x) for x in json.loads(s.load_file("note_xs.json")) if x is not None] if s.file_exists("note_xs.json") else []
             self.measure_data = [
                 (float(tup[0]) if tup[0] is not None else None, float(tup[1]) if tup[1] is not None else None, int(tup[2] or 0))
                 if tup is not None and len(tup) == 3 else (None, None, 0)
                 for tup in json.loads(s.load_file("measure_data.json"))
-            ]
+            ] if s.file_exists("measure_data.json") else []
 
     def _call_midi_to_svg(self, cache_dir: Path, svg_out: Path) -> None:
         try:
@@ -61,7 +61,7 @@ class SheetMusicRenderer:
             if isinstance(res_note_xs, list):
                 self.notehead_xs = [float(x) for x in res_note_xs]
                 try:
-                    with self.save_system() as s:
+                    with self.save_system as s:
                         s.save_file("note_xs.json", json.dumps(self.notehead_xs))
                 except (OSError, TypeError, ValueError) as e:
                     print("SheetMusicRenderer: failed to save note x positions:", e)
@@ -69,7 +69,7 @@ class SheetMusicRenderer:
             # Save measure data
             if isinstance(res_measure_data, list):
                 try:
-                    with self.save_system() as s:
+                    with self.save_system as s:
                         serializable_measure_data = []
                         for tup in res_measure_data:
                             if tup is not None and len(tup) == 3:
@@ -115,9 +115,9 @@ class SheetMusicRenderer:
                 return None, None, 0, 0
 
             svg_width = None
-            if s.file_exists(strip_svg):
+            if s.file_exists(song_svg):
                 try:
-                    tree = ElementTree.parse(io.BytesIO(s.load_file(strip_svg)))
+                    tree = ElementTree.parse(io.BytesIO(s.load_file(song_svg)))
                     root = tree.getroot()
                     w = root.get('width') or root.get('{http://www.w3.org/2000/svg}width')
                     if w:
@@ -201,10 +201,10 @@ class SheetMusicRenderer:
             self._load_cache_data()
 
             if not s.file_exists(strip_png) or not self.notehead_xs or not self.measure_data:
-                self._call_midi_to_svg(cache_dir, s.get_absolute_path(strip_svg))
-                if not s.file_exists(strip_svg):
+                self._call_midi_to_svg(cache_dir, s.get_absolute_path(song_svg))
+                if not s.file_exists(song_svg):
                     raise RuntimeError("No SVG produced by sheet_music_renderer; aborting strip preparation.")
-                ok = self._convert_svg_to_png(s.get_absolute_path(strip_svg), s.get_absolute_path(strip_png))
+                ok = self._convert_svg_to_png(s.get_absolute_path(song_svg), s.get_absolute_path(strip_png))
                 if not ok:
                     return
 

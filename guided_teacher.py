@@ -262,7 +262,7 @@ class GuidedTeacher:
         self.guide_text = None
         self._loop_info_before = None
         self.evaluator_history = {}
-        self.analytics_popup = AnalyticsPopup(self)
+        self.analytics_popup = AnalyticsPopup(self, save_system)
         self._save_lock = threading.Lock()
         self._last_save_time = 0
         self.save_system = save_system.guided_teacher_data

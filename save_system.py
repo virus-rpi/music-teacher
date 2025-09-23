@@ -142,15 +142,29 @@ class SaveIndex:
     def save(self):
         self._save()
 
-    def search(self, path=None, module=None, rel_path=None, sort_by='timestamp', ascending=False):
+    def search(self, path=None, module=None, rel_path=None, sort_by='timestamp', ascending=False, path_match='any', rel_path_match='any'):
+        def match_field(field, value, mode):
+            if value is None:
+                return True
+            if isinstance(value, str):
+                return value in field
+            if isinstance(value, (list, tuple, set)):
+                if mode == 'all':
+                    return all(v in field for v in value)
+                else:
+                    return any(v in field for v in value)
+            return False
+
         with self.lock:
             results = list(self._entries_dict.values())
             if path:
-                results = [e for e in results if path in e['abs_path']]
-            if module:
+                results = [e for e in results if match_field(e['abs_path'], path, path_match)]
+            elif rel_path and module:
+                results = [e for e in results if match_field(e['rel_path'], rel_path, rel_path_match) and e['module'] == module]
+            elif module:
                 results = [e for e in results if e['module'] == module]
-            if rel_path:
-                results = [e for e in results if rel_path in e['rel_path']]
+            elif rel_path:
+                results = [e for e in results if match_field(e['rel_path'], rel_path, rel_path_match)]
             if sort_by == 'timestamp':
                 results.sort(key=lambda e: e['timestamp'], reverse=not ascending)
             elif sort_by == 'alphabet':
@@ -222,5 +236,5 @@ class SaveSystem:
         midi_path = os.path.join(self.save_root, self.midi_filename)
         return midi_path if os.path.exists(midi_path) else None
 
-    def search_index(self, path=None, module=None, rel_path=None, sort_by='timestamp', ascending=False):
-        return self.index.search(path=path, module=module, rel_path=rel_path, sort_by=sort_by, ascending=ascending)
+    def search_index(self, path=None, module=None, rel_path=None, sort_by='timestamp', ascending=False, path_match='any', rel_path_match='any'):
+        return self.index.search(path=path, module=module, rel_path=rel_path, sort_by=sort_by, ascending=ascending, path_match=path_match, rel_path_match=rel_path_match)

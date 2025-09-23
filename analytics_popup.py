@@ -1,14 +1,18 @@
+from collections import defaultdict
 import pygame
 import io
 import numpy as np
 import matplotlib
+from save_system import SaveSystem
+import re
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import pygame_gui
 
 class AnalyticsPopup:
-    def __init__(self, teacher):
+    def __init__(self, teacher, save_system: SaveSystem):
         self.teacher = teacher
+        self.save_system = save_system
         self.visible = False
         self.margin = 30
         self.font = None
@@ -29,13 +33,12 @@ class AnalyticsPopup:
         self._last_ui_build_size = None
         self._last_update_ms = pygame.time.get_ticks()
 
-        self.measure_list = []
-        self.section_dict = {}
+        self.pass_map = None
         self._init_selector()
 
-        self._selected_measure_idx = None
-        self._selected_section_idx = None
-        self._selected_pass_idx = None
+        self._selected_measure = None
+        self._selected_section = None
+        self._selected_pass = None
 
     def toggle(self):
         self.visible = not self.visible
@@ -56,22 +59,23 @@ class AnalyticsPopup:
                 self._last_ui_build_size = None
 
     def _init_selector(self):
-        hist = self.teacher.evaluator_history
-        measure_sections = {}
-        for key in hist.keys():
-            parts = key.split('_')
-            measure = parts[0]
-            measure_sections.setdefault(measure, []).append(key)
-        self.measure_list = sorted(measure_sections.keys(), key=lambda m: int(m))
-        self.section_dict = {m: sorted(measure_sections[m], key=lambda k: hist[k].get('scores', [-1])[-1] if hist[k].get('scores') else -1) for m in self.measure_list}
-        if self.measure_list:
-            self._selected_measure_idx = len(self.measure_list) - 1
-            measure = self.measure_list[self._selected_measure_idx]
-            self._selected_section_idx = max(0, len(self.section_dict.get(measure, [])) - 1)
-        else:
-            self._selected_measure_idx = 0
-            self._selected_section_idx = 0
-        self._selected_pass_idx = 0
+        self._selected_measure = None
+        self._selected_section = None
+        self._selected_pass = None
+        self.pass_map = defaultdict(lambda: defaultdict(dict))
+        results = self.save_system.search_index(module="guided_teacher_data", rel_path=['pass_', '.json'], sort_by='timestamp', ascending=False, rel_path_match="all")
+        for entry in results:
+            path = entry['rel_path']
+            m = re.search(r'measure_(\d+)/section_(\w+|\d+)/pass_(\d+)\.json', path)
+            if m:
+                measure = int(m.group(1))
+                section = str(m.group(2))
+                pass_num = int(m.group(3))
+                self.pass_map[measure][section][pass_num] = path
+                if self._selected_measure is None:
+                    self._selected_measure = measure
+                    self._selected_section = section
+                    self._selected_pass = pass_num
 
     def _build_ui(self, sw, sh):
         if self.window is not None:
@@ -99,8 +103,8 @@ class AnalyticsPopup:
             container=container
         )
         curr_x += 260 + 8
-        measure_options = [f"Measure {m}" for m in self.measure_list] if self.measure_list else ['—']
-        starting_measure = measure_options[self._selected_measure_idx] if self.measure_list else '—'
+        measure_options = [f"Measure {m}" for m in sorted(self.pass_map.keys(), key=int)] if self.pass_map else ['—']
+        starting_measure = f"Measure {self._selected_measure}" if self._selected_measure else measure_options[0]
         self.dd_measure = pygame_gui.elements.UIDropDownMenu(
             options_list=measure_options,
             starting_option=starting_measure,
@@ -109,9 +113,8 @@ class AnalyticsPopup:
             container=container
         )
         curr_x += 160 + 8
-        section_keys = self.section_dict.get(self.measure_list[self._selected_measure_idx], []) if self.measure_list else []
-        section_options = [f"Section {i+1}" for i in range(len(section_keys))] if section_keys else ['—']
-        starting_section = section_options[self._selected_section_idx] if section_keys else '—'
+        section_options = [f"Section {s}" for s in sorted(self.pass_map[self._selected_measure].keys())] if self._selected_measure is not None and self.pass_map.get(self._selected_measure) else ['—']
+        starting_section = f"Section {self._selected_section}" if self._selected_section else section_options[0]
         self.dd_section = pygame_gui.elements.UIDropDownMenu(
             options_list=section_options,
             starting_option=starting_section,
@@ -120,9 +123,8 @@ class AnalyticsPopup:
             container=container
         )
         curr_x += 140 + 8
-        pass_count = self._get_selected_pass_count()
-        pass_options = [f"Pass {i+1}" for i in range(max(1, pass_count))]
-        starting_pass = pass_options[min(self._selected_pass_idx, len(pass_options)-1)]
+        pass_options = [f"Pass {p}" for p in sorted(self.pass_map[self._selected_measure][self._selected_section].keys())] if self._selected_measure is not None and self._selected_section is not None and self.pass_map.get(self._selected_measure, {}).get(self._selected_section) else ['—']
+        starting_pass = f"Pass {self._selected_pass}" if self._selected_pass else pass_options[0]
         self.dd_pass = pygame_gui.elements.UIDropDownMenu(
             options_list=pass_options,
             starting_option=starting_pass,
@@ -159,27 +161,13 @@ class AnalyticsPopup:
         )
         self._refresh_charts_and_tips()
 
-    def _get_selected_pass_count(self):
-        measure_idx = self._selected_measure_idx
-        if not self.measure_list:
-            return 0
-        measure = self.measure_list[measure_idx]
-        section_keys = self.section_dict.get(measure, [])
-        if not section_keys:
-            return 0
-        if self._selected_section_idx >= len(section_keys):
-            return 0
-        key = section_keys[self._selected_section_idx]
-        entry = self.teacher.evaluator_history.get(key, {})
-        return len(entry.get('analytics', []))
-
     def _rebuild_section_dropdown(self):
         if self.dd_section is not None:
             self.dd_section.kill()
-        section_keys = self.section_dict.get(self.measure_list[self._selected_measure_idx], []) if self.measure_list else []
-        section_options = [f"Section {i+1}" for i in range(len(section_keys))] if section_keys else ['—']
-        self._selected_section_idx = min(self._selected_section_idx, max(0, len(section_options)-1))
-        starting_section = section_options[self._selected_section_idx]
+        section_options = [f"Section {s}" for s in sorted(
+            self.pass_map[self._selected_measure].keys())] if self._selected_measure is not None and self.pass_map.get(
+            self._selected_measure) else ['—']
+        starting_section = f"Section {self._selected_section}" if self._selected_section else section_options[0]
         rect = pygame.Rect(self.dd_measure.rect.right + 8 - self.window.rect.x, self.dd_measure.rect.y - self.window.rect.y, 140, 28)
         self.dd_section = pygame_gui.elements.UIDropDownMenu(
             options_list=section_options,
@@ -188,16 +176,15 @@ class AnalyticsPopup:
             manager=self.ui_manager,
             container=self.window
         )
-        self._selected_pass_idx = 0
         self._rebuild_pass_dropdown()
 
     def _rebuild_pass_dropdown(self):
         if self.dd_pass is not None:
             self.dd_pass.kill()
-        pass_count = self._get_selected_pass_count()
-        pass_options = [f"Pass {i+1}" for i in range(max(1, pass_count))]
-        self._selected_pass_idx = min(self._selected_pass_idx, len(pass_options)-1)
-        starting_pass = pass_options[self._selected_pass_idx]
+        pass_options = sorted([f"Pass {p}" for p in self.pass_map[self._selected_measure][
+            self._selected_section].keys()]) if self._selected_measure is not None and self._selected_section is not None and self.pass_map.get(
+            self._selected_measure, {}).get(self._selected_section) else ['—']
+        starting_pass = f"Pass {self._selected_pass}" if self._selected_pass else pass_options[0]
         rect = pygame.Rect(self.dd_section.rect.right + 8 - self.window.rect.x, self.dd_section.rect.y - self.window.rect.y, 120, 28)
         self.dd_pass = pygame_gui.elements.UIDropDownMenu(
             options_list=pass_options,
@@ -213,34 +200,37 @@ class AnalyticsPopup:
         self.ui_manager.process_events(event)
         if event.type == pygame.USEREVENT and event.user_type == pygame_gui.UI_DROP_DOWN_MENU_CHANGED:
             if event.ui_element == self.dd_measure:
-                # update selected measure index
-                if self.measure_list:
-                    self._selected_measure_idx = self.dd_measure.options_list.index(self.dd_measure.selected_option)
-                self._selected_section_idx = 0
-                self._selected_pass_idx = 0
+                selected = self.dd_measure.selected_option[0]
+                m = re.match(r'Measure (\d+)', selected)
+                if m:
+                    self._selected_measure = m.group(1)
+                    sections = sorted(self.pass_map[self._selected_measure].keys())
+                    self._selected_section = sections[0] if sections else None
+                    passes = list(self.pass_map[self._selected_measure][self._selected_section].keys()) if self._selected_section is not None else []
+                    self._selected_pass = passes[0] if passes else None
                 self._rebuild_section_dropdown()
                 self._refresh_charts_and_tips()
             elif event.ui_element == self.dd_section:
-                section_options = self.dd_section.options_list
-                self._selected_section_idx = max(0, section_options.index(self.dd_section.selected_option)) if section_options else 0
-                self._selected_pass_idx = 0
+                selected = self.dd_section.selected_option[0]
+                s = re.match(r'Section (\w+|\d+)', selected)
+                if s:
+                    self._selected_section = s.group(1)
+                    passes = list(self.pass_map[self._selected_measure][self._selected_section].keys()) if self._selected_measure is not None and self._selected_section is not None else []
+                    self._selected_pass = passes[0] if passes else None
                 self._rebuild_pass_dropdown()
                 self._refresh_charts_and_tips()
             elif event.ui_element == self.dd_pass:
-                pass_options = self.dd_pass.options_list
-                self._selected_pass_idx = max(0, pass_options.index(self.dd_pass.selected_option)) if pass_options else 0
+                selected = self.dd_pass.selected_option[0]
+                p = re.match(r'Pass (\d+)', selected)
+                if p:
+                    self._selected_pass = int(p.group(1))
                 self._refresh_charts_and_tips()
 
     def _get_selected_key(self):
-        if not self.measure_list:
+        # Compose key from selected measure and section
+        if not self._selected_measure or not self._selected_section:
             return None
-        measure = self.measure_list[self._selected_measure_idx]
-        section_keys = self.section_dict.get(measure, [])
-        if not section_keys:
-            return None
-        if self._selected_section_idx >= len(section_keys):
-            return None
-        return section_keys[self._selected_section_idx]
+        return f"measure_{self._selected_measure}_section_{self._selected_section}"
 
     def _get_selected_analytics(self):
         key = self._get_selected_key()
@@ -249,9 +239,10 @@ class AnalyticsPopup:
         hist = self.teacher.evaluator_history
         entry = hist.get(key, {})
         analytics_list = entry.get('analytics', [])
-        if analytics_list:
-            idx = min(self._selected_pass_idx, len(analytics_list) - 1)
-            return analytics_list[idx]
+        if analytics_list and self._selected_pass is not None:
+            idx = self.pass_map[self._selected_measure][self._selected_section].index(self._selected_pass)
+            if idx < len(analytics_list):
+                return analytics_list[idx]
         return None
 
     def _refresh_charts_and_tips(self):
