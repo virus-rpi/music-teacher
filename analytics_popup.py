@@ -1,3 +1,4 @@
+import json
 from collections import defaultdict
 import pygame
 import io
@@ -226,24 +227,11 @@ class AnalyticsPopup:
                     self._selected_pass = int(p.group(1))
                 self._refresh_charts_and_tips()
 
-    def _get_selected_key(self):
-        # Compose key from selected measure and section
-        if not self._selected_measure or not self._selected_section:
-            return None
-        return f"measure_{self._selected_measure}_section_{self._selected_section}"
-
     def _get_selected_analytics(self):
-        key = self._get_selected_key()
-        if not key:
-            return None
-        hist = self.teacher.evaluator_history
-        entry = hist.get(key, {})
-        analytics_list = entry.get('analytics', [])
-        if analytics_list and self._selected_pass is not None:
-            idx = self.pass_map[self._selected_measure][self._selected_section].index(self._selected_pass)
-            if idx < len(analytics_list):
-                return analytics_list[idx]
-        return None
+        with self.save_system.guided_teacher_data as s:
+            raw = json.loads(s.load_file(self.pass_map[self._selected_measure][self._selected_section][self._selected_pass]))
+            analytics = raw.get('analytics', {})
+            return analytics
 
     def _refresh_charts_and_tips(self):
         analytics = self._get_selected_analytics()
