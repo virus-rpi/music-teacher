@@ -21,48 +21,35 @@ class AnalyticsPopup:
         self.small_font = None
         self.width = None
         self.height = None
-
         self.ui_manager = pygame_gui.UIManager((800, 600))
         self.window = None
-        self.panel = None
-        self.lbl_title = None
         self.dd_measure = None
         self.dd_section = None
         self.dd_pass = None
         self.img_bar = None
         self.img_spider = None
         self.tips_box = None
-        self._last_ui_build_size = None
         self._last_update_ms = pygame.time.get_ticks()
-
         self.pass_map = None
         self._init_selector()
-
         self._selected_measure = None
         self._selected_section = None
         self._selected_pass = None
-
-        self._x_measure = None
-        self._x_section = None
-        self._x_pass = None
 
     def toggle(self):
         self.visible = not self.visible
         if self.visible:
             self._init_selector()
         else:
-            if self.window is not None:
-                self.window.kill()
-                self.window = None
-                self.panel = None
-                self.lbl_title = None
-                self.dd_measure = None
-                self.dd_section = None
-                self.dd_pass = None
-                self.img_bar = None
-                self.img_spider = None
-                self.tips_box = None
-                self._last_ui_build_size = None
+            self._reset_ui_elements()
+
+    def _reset_ui_elements(self):
+        for attr in ['window', 'dd_measure', 'dd_section', 'dd_pass', 'img_bar', 'img_spider', 'tips_box']:
+            obj = getattr(self, attr, None)
+            if obj is not None:
+                if hasattr(obj, 'kill'):
+                    obj.kill()
+                setattr(self, attr, None)
 
     def _init_selector(self):
         self._selected_measure = None
@@ -83,45 +70,54 @@ class AnalyticsPopup:
                     self._selected_section = section
                     self._selected_pass = pass_num
 
-    def _build_ui(self, sw, sh, x, y, pad):
-        self.width = int(sw * 0.9)
-        self.height = int(sh * 0.85)
-        pad_side = int(self.width * 0.1)
-        chart_w = int(self.width * 0.6)
-        chart_h = int(self.height * 0.28)
-        tips_w = self.width - chart_w - pad_side * 2 - 10
-        tips_h = int(self.height * 0.6)
+    def _create_dropdown(self, options, starting_option, width, object_id):
+        return pygame_gui.elements.UIDropDownMenu(
+            options_list=options,
+            starting_option=starting_option,
+            relative_rect=pygame.Rect(0, 0, width, 32),
+            manager=self.ui_manager,
+            object_id=object_id
+        )
 
+    @staticmethod
+    def _get_layout_dimensions(sw, sh):
+        width = int(sw * 0.9)
+        height = int(sh * 0.85)
+        pad_side = int(width * 0.1)
+        chart_w = int(width * 0.6)
+        chart_h = int(height * 0.28)
+        tips_w = width - chart_w - pad_side * 2 - 10
+        tips_h = int(height * 0.6)
+        return {
+            'width': width,
+            'height': height,
+            'pad_side': pad_side,
+            'chart_w': chart_w,
+            'chart_h': chart_h,
+            'tips_w': tips_w,
+            'tips_h': tips_h
+        }
+
+    def _build_ui(self, sw, sh):
+        dims = self._get_layout_dimensions(sw, sh)
+        self.width = dims['width']
+        self.height = dims['height']
+        chart_w = dims['chart_w']
+        chart_h = dims['chart_h']
+        tips_w = dims['tips_w']
+        tips_h = dims['tips_h']
         dd_measure_w = 200
         dd_section_w = 220
         dd_pass_w = 140
         measure_options = [f"Measure {m}" for m in sorted(self.pass_map.keys(), key=int)] if self.pass_map else ['—']
         starting_measure = f"Measure {self._selected_measure}" if self._selected_measure else measure_options[0]
-        self.dd_measure = pygame_gui.elements.UIDropDownMenu(
-            options_list=measure_options,
-            starting_option=starting_measure,
-            relative_rect=pygame.Rect(0, 0, dd_measure_w, 32),
-            manager=self.ui_manager,
-            object_id='#analytics_dd_measure'
-        )
+        self.dd_measure = self._create_dropdown(measure_options, starting_measure, dd_measure_w, '#analytics_dd_measure')
         section_options = [f"Section {s}" for s in sorted(self.pass_map[self._selected_measure].keys())] if self._selected_measure is not None and self.pass_map.get(self._selected_measure) else ['—']
         starting_section = f"Section {self._selected_section}" if self._selected_section else section_options[0]
-        self.dd_section = pygame_gui.elements.UIDropDownMenu(
-            options_list=section_options,
-            starting_option=starting_section,
-            relative_rect=pygame.Rect(0, 0, dd_section_w, 32),
-            manager=self.ui_manager,
-            object_id=ObjectID(class_id='@section_dropdown')
-        )
+        self.dd_section = self._create_dropdown(section_options, starting_section, dd_section_w, ObjectID(class_id='@section_dropdown'))
         pass_options = [f"Pass {p}" for p in sorted(self.pass_map[self._selected_measure][self._selected_section].keys())] if self._selected_measure is not None and self._selected_section is not None and self.pass_map.get(self._selected_measure, {}).get(self._selected_section) else ['—']
         starting_pass = f"Pass {self._selected_pass}" if self._selected_pass else pass_options[0]
-        self.dd_pass = pygame_gui.elements.UIDropDownMenu(
-            options_list=pass_options,
-            starting_option=starting_pass,
-            relative_rect=pygame.Rect(0, 0, dd_pass_w, 32),
-            manager=self.ui_manager,
-            object_id='#analytics_dd_pass'
-        )
+        self.dd_pass = self._create_dropdown(pass_options, starting_pass, dd_pass_w, '#analytics_dd_pass')
         self.img_bar = pygame_gui.elements.UIImage(
             relative_rect=pygame.Rect(0, 0, chart_w, chart_h),
             image_surface=pygame.Surface((chart_w, chart_h), pygame.SRCALPHA),
@@ -148,26 +144,16 @@ class AnalyticsPopup:
         dd_section_w = 220
         section_options = [f"Section {s}" for s in sorted(self.pass_map[self._selected_measure].keys())] if self._selected_measure is not None and self.pass_map.get(self._selected_measure) else ['—']
         starting_section = f"Section {self._selected_section}" if self._selected_section else section_options[0]
-        self.dd_section = pygame_gui.elements.UIDropDownMenu(
-            options_list=section_options,
-            starting_option=starting_section,
-            relative_rect=pygame.Rect(0, 0, dd_section_w, 32),
-            manager=self.ui_manager,
-            object_id=ObjectID(class_id='@section_dropdown')
-        )
+        self.dd_section = self._create_dropdown(section_options, starting_section, dd_section_w, ObjectID(class_id='@section_dropdown'))
         self._rebuild_pass_dropdown()
 
     def _rebuild_pass_dropdown(self):
         if self.dd_pass is not None:
             self.dd_pass.kill()
         dd_pass_w = 140
-        self.dd_pass = pygame_gui.elements.UIDropDownMenu(
-            options_list=sorted([f"Pass {p}" for p in self.pass_map[self._selected_measure][self._selected_section].keys()]) if self._selected_measure is not None and self._selected_section is not None and self.pass_map.get(self._selected_measure, {}).get(self._selected_section) else ['—'],
-            starting_option=f"Pass {self._selected_pass}" if self._selected_pass else (sorted([f"Pass {p}" for p in self.pass_map[self._selected_measure][self._selected_section].keys()])[0] if self._selected_measure is not None and self._selected_section is not None and self.pass_map.get(self._selected_measure, {}).get(self._selected_section) else '—'),
-            relative_rect=pygame.Rect(0, 0, dd_pass_w, 32),
-            manager=self.ui_manager,
-            object_id='#analytics_dd_pass'
-        )
+        pass_options = [f"Pass {p}" for p in sorted(self.pass_map[self._selected_measure][self._selected_section].keys())] if self._selected_measure is not None and self._selected_section is not None and self.pass_map.get(self._selected_measure, {}).get(self._selected_section) else ['—']
+        starting_pass = f"Pass {self._selected_pass}" if self._selected_pass else (pass_options[0] if pass_options else '—')
+        self.dd_pass = self._create_dropdown(pass_options, starting_pass, dd_pass_w, '#analytics_dd_pass')
 
     def handle_event(self, event):
         if not self.visible:
@@ -202,8 +188,9 @@ class AnalyticsPopup:
                 self._refresh_charts_and_tips()
 
     def _get_selected_analytics(self):
+        if not (self.pass_map and self.pass_map[self._selected_measure] and self.pass_map[self._selected_measure][self._selected_section] and self.pass_map[self._selected_measure][self._selected_section][self._selected_pass]):
+            return {}
         with self.save_system.guided_teacher_data as s:
-            print(f"Loading measure {self._selected_measure}, section {self._selected_section}, pass {self._selected_pass} from {self.pass_map[self._selected_measure][self._selected_section][self._selected_pass]}")
             raw = json.loads(s.load_file(self.pass_map[self._selected_measure][self._selected_section][self._selected_pass]))
             analytics = raw.get('analytics', {})
             return analytics
@@ -220,11 +207,9 @@ class AnalyticsPopup:
         if analytics:
             spider_chart = self._matplotlib_spider_chart(analytics, width=content_w, height=spider_h)
             self.img_spider.set_image(spider_chart)
-            # tips
             tips_html = self._generate_tips_html(analytics)
             self.tips_box.set_text(tips_html)
         else:
-            # Clear contents
             self.img_bar.set_image(pygame.Surface((content_w, bar_h), pygame.SRCALPHA))
             self.img_spider.set_image(pygame.Surface((content_w, spider_h), pygame.SRCALPHA))
             self.tips_box.set_text('<b>No analytics available yet.</b>')
@@ -261,29 +246,24 @@ class AnalyticsPopup:
             self.font = pygame.font.SysFont('Arial', 22)
             self.small_font = pygame.font.SysFont('Arial', 16)
         sw, sh = surface.get_size()
-        # Dynamically update UIManager size to match window
         if self.ui_manager.window_resolution != (sw, sh):
             self.ui_manager.set_window_resolution((sw, sh))
-        self.width = int(sw * 0.9)
-        self.height = int(sh * 0.85)
-        pad = 24  # Reduced padding for closer border
+        dims = self._get_layout_dimensions(sw, sh)
+        self.width = dims['width']
+        self.height = dims['height']
+        pad = 32
         pad_top = pad
         pad_side = pad
         x = (sw - self.width) // 2
         y = (sh - self.height) // 4
         pygame.draw.rect(surface, (30, 30, 30), (x, y, self.width, self.height), border_radius=16)
         pygame.draw.rect(surface, (200, 200, 200), (x, y, self.width, self.height), 2, border_radius=16)
-
-        # Build UI elements if needed
         if self.dd_measure is None or self.dd_section is None or self.dd_pass is None or self.img_spider is None or self.tips_box is None:
-            self._build_ui(sw, sh, x, y, pad)
-
-        # Title
+            self._build_ui(sw, sh)
         title_surf = self.font.render('Performance Analytics for', True, (255, 255, 255))
         title_x = x + pad_side
         title_y = y + pad_top
         surface.blit(title_surf, (title_x, title_y))
-
         dd_y = title_y
         dd_x = title_x + title_surf.get_width() + 12
         self.dd_measure.set_relative_position((dd_x, dd_y))
@@ -291,27 +271,21 @@ class AnalyticsPopup:
         self.dd_section.set_relative_position((dd_x, dd_y))
         dd_x += self.dd_section.rect.width + 12
         self.dd_pass.set_relative_position((dd_x, dd_y))
-
-        # Charts
         chart_pad_top = pad_top + 40
         chart_x = x + pad_side
-        chart_w = int(self.width * 0.55)
-        chart_h = int(self.height * 0.28)
+        chart_w = dims['chart_w']
+        chart_h = dims['chart_h']
         self.img_bar.set_dimensions((chart_w, chart_h))
         self.img_bar.set_relative_position((chart_x, y + chart_pad_top))
         spider_y = y + chart_pad_top + chart_h + 20
         self.img_spider.set_dimensions((chart_w, chart_h))
         self.img_spider.set_relative_position((chart_x, spider_y))
-
-        # Tips box
         tips_x = chart_x + chart_w + 24
         tips_y = y + chart_pad_top
-        tips_w = self.width - chart_w - pad_side * 2 - 36
-        tips_h = int(self.height * 0.6)
+        tips_w = dims['tips_w']
+        tips_h = dims['tips_h']
         self.tips_box.set_relative_position((tips_x, tips_y))
         self.tips_box.set_dimensions((tips_w, tips_h))
-
-        # Update and draw UI elements
         now = pygame.time.get_ticks()
         dt = max(0, now - self._last_update_ms) / 1000.0
         self._last_update_ms = now
@@ -328,7 +302,7 @@ class AnalyticsPopup:
             analytics.get('absolute', 0),
             legato_score
         ])
-        values = np.append(values, values[0])  # close the loop
+        values = np.append(values, values[0])
         angles = np.linspace(0, 2 * np.pi, len(labels), endpoint=False)
         angles = np.append(angles, angles[0])
         fig = plt.figure(figsize=(width / 100, height / 100), dpi=100)
