@@ -309,6 +309,7 @@ class GuidedTeacher:
             self.generate_tasks_for_measure(self.current_measure_index)
 
     def stop(self):
+        if self.analytics_popup.visible: self.analytics_popup.toggle()
         self.is_active = False
         self.save_state()
         self.tasks.clear()

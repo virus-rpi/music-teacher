@@ -86,7 +86,7 @@ class AnalyticsPopup:
     def _build_ui(self, sw, sh, x, y, pad):
         self.width = int(sw * 0.9)
         self.height = int(sh * 0.85)
-        pad_side = int(self.width * 0.05)
+        pad_side = int(self.width * 0.1)
         chart_w = int(self.width * 0.6)
         chart_h = int(self.height * 0.28)
         tips_w = self.width - chart_w - pad_side * 2 - 10
@@ -146,8 +146,6 @@ class AnalyticsPopup:
         if self.dd_section is not None:
             self.dd_section.kill()
         dd_section_w = 220
-        dd_y = int(self.height * 0.05)
-        dd_x = int(self.width * 0.05) + 200 + 8 + self.font.size('Performance Analytics for')[0] + 8
         section_options = [f"Section {s}" for s in sorted(self.pass_map[self._selected_measure].keys())] if self._selected_measure is not None and self.pass_map.get(self._selected_measure) else ['—']
         starting_section = f"Section {self._selected_section}" if self._selected_section else section_options[0]
         self.dd_section = pygame_gui.elements.UIDropDownMenu(
@@ -286,7 +284,6 @@ class AnalyticsPopup:
         title_y = y + pad_top
         surface.blit(title_surf, (title_x, title_y))
 
-        # Dropdowns (wider, spaced, closer to border)
         dd_y = title_y
         dd_x = title_x + title_surf.get_width() + 12
         self.dd_measure.set_relative_position((dd_x, dd_y))
