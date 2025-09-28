@@ -263,9 +263,9 @@ class AnalyticsPopup:
         dd_x += self.dd_section.rect.width + 12
         self.dd_pass.set_relative_position((dd_x, dd_y))
 
-        score_val = analytics.get('accuracy', None)
+        score_val = analytics.get('score', None).get('overall', None) if analytics and analytics.get('score') else None
         if score_val is not None:
-            score_text = f"Overall Score: {score_val:.2f}"
+            score_text = f"Overall Score: {score_val * 100:.0f}%"
         else:
             score_text = "Overall Score: —"
         score_color = (80, 200, 120) if score_val and score_val >= 0.8 else (255, 120, 120)
@@ -367,7 +367,7 @@ class AnalyticsPopup:
         if self.pass_map and self._selected_measure is not None and self._selected_section is not None and self._selected_pass is not None:
             json_path = self.pass_map[self._selected_measure][self._selected_section][self._selected_pass]
             midi_path = json_path.replace('.json', '.mid')
-            full_midi_path = self.save_system.guided_teacher_data.get_absolute_path(midi_path)
+            full_midi_path = str(self.save_system.guided_teacher_data.data_dir / midi_path)
             try:
                 mid = mido.MidiFile(full_midi_path)
                 abs_time = 0
@@ -380,10 +380,15 @@ class AnalyticsPopup:
         # Visualization
         img = pygame.Surface((width, height), pygame.SRCALPHA)
         img.fill((0, 0, 0, 0))
-        # Map notes to y positions
         all_notes = [n['note'] for n in expected_notes if isinstance(n['note'], int)] + [n['note'] for n in performed_notes if isinstance(n['note'], int)]
         if not all_notes:
+            # Draw debug border to confirm pianoroll is visible
+            pygame.draw.rect(img, (255, 0, 255), (0, 0, width-1, height-1), 2)
+            font = pygame.font.SysFont('Arial', 18)
+            txt = font.render('No notes to display', True, (255, 0, 255))
+            img.blit(txt, (10, 10))
             return img
+        # Map notes to y positions
         min_note = min(all_notes)
         max_note = max(all_notes)
         note_range = max_note - min_note + 1

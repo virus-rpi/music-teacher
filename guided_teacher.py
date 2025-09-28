@@ -195,7 +195,14 @@ class PracticeSectionTask(Task):
             section_idx = next((i for i, sec in enumerate(self.teacher.split_measure_into_sections(self.measure)) if sec.start_idx == self.section.start_idx and sec.end_idx == self.section.end_idx), None)
         if section_idx is not None:
             pass_idx = self.teacher.pass_index.get(str(self.measure), {}).get(str(section_idx), 0)
-            self.teacher.save_pass(self.measure, section_idx, pass_idx, getattr(evaluator, 'analytics', {}), evaluator.score.overall,
+            analytics = evaluator.analytics.copy()
+            analytics["score"] = {
+                "overall": evaluator.score.overall,
+                "accuracy": evaluator.score.accuracy,
+                "relative_timing": evaluator.score.relative_timing,
+                "absolute_timing": evaluator.score.absolute_timing,
+            }
+            self.teacher.save_pass(self.measure, section_idx, pass_idx, analytics,
                                    self.recording.copy())
         else:
             print(f"Could not find section {self.section.start_idx} {self.section.end_idx} in measure {self.measure}")
@@ -478,9 +485,9 @@ class GuidedTeacher:
         self.guide_text = d.get('guide_text', None)
         self.pass_index = d.get('pass_index', {})
 
-    def save_pass(self, measure_idx, section_idx, pass_idx, analytics, score, recording):
+    def save_pass(self, measure_idx, section_idx, pass_idx, analytics, recording):
         with self.save_system as s:
-            s.save_file(f"measure_{measure_idx}/section_{section_idx}/pass_{pass_idx}.json", json.dumps({'analytics': analytics, 'score': score, 'timestamp': time.time()}, indent=2, default=str))
+            s.save_file(f"measure_{measure_idx}/section_{section_idx}/pass_{pass_idx}.json", json.dumps({'analytics': analytics, 'timestamp': time.time()}, indent=2, default=str))
             if recording is not None and isinstance(recording, mido.MidiTrack):
                 mid = mido.MidiFile()
                 mid.tracks.append(recording)
