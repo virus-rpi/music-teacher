@@ -7,6 +7,7 @@ import matplotlib
 from save_system import SaveSystem
 import re
 from pygame_gui.core import ObjectID
+import mido
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import pygame_gui
@@ -26,6 +27,7 @@ class AnalyticsPopup:
         self.dd_section = None
         self.dd_pass = None
         self.img_spider = None
+        self.img_pianoroll = None
         self.tips_box = None
         self._last_update_ms = pygame.time.get_ticks()
         self.pass_map = None
@@ -45,7 +47,7 @@ class AnalyticsPopup:
             self._reset_ui_elements()
 
     def _reset_ui_elements(self):
-        for attr in ['dd_measure', 'dd_section', 'dd_pass', 'img_spider', 'tips_box']:
+        for attr in ['dd_measure', 'dd_section', 'dd_pass', 'img_spider', 'img_pianoroll', 'tips_box']:
             obj = getattr(self, attr, None)
             if obj is not None:
                 if hasattr(obj, 'kill'):
@@ -93,6 +95,7 @@ class AnalyticsPopup:
         score_h = 40
         radar_h = tips_h - heading_h - score_h - margin * 2
         radar_w = left_w - margin * 2
+        pianoroll_h = int((height - margin * 3) * 0.5)
         return {
             'width': width,
             'height': height,
@@ -104,7 +107,8 @@ class AnalyticsPopup:
             'heading_h': heading_h,
             'score_h': score_h,
             'radar_w': radar_w,
-            'radar_h': radar_h
+            'radar_h': radar_h,
+            'pianoroll_h': pianoroll_h
         }
 
     def _build_ui(self, sw, sh):
@@ -132,6 +136,12 @@ class AnalyticsPopup:
             image_surface=pygame.Surface((radar_w, radar_h), pygame.SRCALPHA),
             manager=self.ui_manager,
             object_id='#analytics_img_spider'
+        )
+        self.img_pianoroll = pygame_gui.elements.UIImage(
+            relative_rect=pygame.Rect(0, 0, radar_w, dims['pianoroll_h']),
+            image_surface=pygame.Surface((radar_w, dims['pianoroll_h']), pygame.SRCALPHA),
+            manager=self.ui_manager,
+            object_id='#analytics_img_pianoroll'
         )
         self.tips_box = pygame_gui.elements.UITextBox(
             html_text='',
@@ -207,9 +217,12 @@ class AnalyticsPopup:
             self.img_spider.set_image(spider_chart)
             tips_html = self._generate_tips_html(analytics)
             self.tips_box.set_text(tips_html)
+            pianoroll_image = self._render_pianoroll(analytics, width=content_w, height=self.img_pianoroll.rect.height)
+            self.img_pianoroll.set_image(pianoroll_image)
         else:
             self.img_spider.set_image(pygame.Surface((content_w, spider_h), pygame.SRCALPHA))
             self.tips_box.set_text('<b>No analytics available yet.</b>')
+            self.img_pianoroll.set_image(pygame.Surface((content_w, self.img_pianoroll.rect.height), pygame.SRCALPHA))
 
     @staticmethod
     def _generate_tips_html(analytics):
@@ -266,6 +279,10 @@ class AnalyticsPopup:
         self.img_spider.set_dimensions((dims['radar_w'], dims['radar_h']))
         self.img_spider.set_relative_position((radar_x, radar_y))
 
+        pianoroll_y = radar_y + dims['radar_h'] + dims['margin']
+        self.img_pianoroll.set_dimensions((dims['radar_w'], dims['pianoroll_h']))
+        self.img_pianoroll.set_relative_position((radar_x, pianoroll_y))
+
     def draw(self, surface):
         if not self.visible:
             return
@@ -281,7 +298,7 @@ class AnalyticsPopup:
         pygame.draw.rect(surface, (30, 30, 30), (x, y, self.width, self.height), border_radius=16)
         pygame.draw.rect(surface, (200, 200, 200), (x, y, self.width, self.height), 2, border_radius=16)
 
-        ui_was_none = self.dd_measure is None or self.dd_section is None or self.dd_pass is None or self.img_spider is None or self.tips_box is None
+        ui_was_none = self.dd_measure is None or self.dd_section is None or self.dd_pass is None or self.img_spider is None or self.img_pianoroll is None or self.tips_box is None
         if ui_was_none:
             self._build_ui(sw, sh)
             self._refresh_charts_and_tips()
@@ -328,4 +345,80 @@ class AnalyticsPopup:
         plt.close(fig)
         buf.seek(0)
         img = pygame.image.load(buf, 'spider_chart.png').convert_alpha()
+        return img
+
+    def _render_pianoroll(self, analytics, width=300, height=200):
+        # Get expected notes from teacher
+        expected_notes = []
+        if self._selected_measure is not None:
+            try:
+                chords, times, xs, _, _ = self.teacher.midi_teacher.get_notes_for_measure(self._selected_measure)
+                for chord, time in zip(chords, times):
+                    # Flatten chord to individual notes
+                    if isinstance(chord, (list, tuple)):
+                        for note in chord:
+                            expected_notes.append({'note': note, 'start': time, 'duration': 0.5})
+                    else:
+                        expected_notes.append({'note': chord, 'start': time, 'duration': 0.5})
+            except Exception:
+                pass
+        # Get performed notes from MIDI file
+        performed_notes = []
+        if self.pass_map and self._selected_measure is not None and self._selected_section is not None and self._selected_pass is not None:
+            json_path = self.pass_map[self._selected_measure][self._selected_section][self._selected_pass]
+            midi_path = json_path.replace('.json', '.mid')
+            full_midi_path = self.save_system.guided_teacher_data.get_absolute_path(midi_path)
+            try:
+                mid = mido.MidiFile(full_midi_path)
+                abs_time = 0
+                for msg in mid:
+                    abs_time += msg.time
+                    if msg.type == 'note_on' and msg.velocity > 0:
+                        performed_notes.append({'note': msg.note, 'start': abs_time, 'duration': 0.5})
+            except Exception:
+                pass
+        # Visualization
+        img = pygame.Surface((width, height), pygame.SRCALPHA)
+        img.fill((0, 0, 0, 0))
+        # Map notes to y positions
+        all_notes = [n['note'] for n in expected_notes if isinstance(n['note'], int)] + [n['note'] for n in performed_notes if isinstance(n['note'], int)]
+        if not all_notes:
+            return img
+        min_note = min(all_notes)
+        max_note = max(all_notes)
+        note_range = max_note - min_note + 1
+        def note_to_y(note):
+            return int(height - ((note - min_note) / note_range) * height)
+        # Map time to x positions
+        all_starts = [n['start'] for n in expected_notes] + [n['start'] for n in performed_notes]
+        min_start = min(all_starts)
+        max_start = max(all_starts)
+        time_range = max_start - min_start if max_start > min_start else 1
+        def time_to_x(start):
+            return int(((start - min_start) / time_range) * (width - 40)) + 20
+        # Draw expected notes (green)
+        for n in expected_notes:
+            if not isinstance(n['note'], int):
+                continue
+            x = time_to_x(n['start'])
+            y = note_to_y(n['note'])
+            w = 8
+            h = 12
+            pygame.draw.rect(img, (0, 200, 0), (x, y, w, h))
+        # Draw performed notes (red or yellow if timing error)
+        for pn in performed_notes:
+            if not isinstance(pn['note'], int):
+                continue
+            x = time_to_x(pn['start'])
+            y = note_to_y(pn['note'])
+            w = 8
+            h = 12
+            # Check for matching expected note
+            match = next((en for en in expected_notes if en['note'] == pn['note']), None)
+            if match:
+                timing_error = abs(match['start'] - pn['start']) > 0.2
+                color = (220, 220, 0) if timing_error else (220, 0, 0)
+            else:
+                color = (220, 0, 0)
+            pygame.draw.rect(img, color, (x, y, w, h))
         return img
