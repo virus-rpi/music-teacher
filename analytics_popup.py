@@ -22,11 +22,9 @@ class AnalyticsPopup:
         self.width = None
         self.height = None
         self.ui_manager = pygame_gui.UIManager((800, 600))
-        self.window = None
         self.dd_measure = None
         self.dd_section = None
         self.dd_pass = None
-        self.img_bar = None
         self.img_spider = None
         self.tips_box = None
         self._last_update_ms = pygame.time.get_ticks()
@@ -81,31 +79,44 @@ class AnalyticsPopup:
 
     @staticmethod
     def _get_layout_dimensions(sw, sh):
+        margin = 32
         width = int(sw * 0.9)
         height = int(sh * 0.85)
-        pad_side = int(width * 0.1)
-        chart_w = int(width * 0.6)
-        chart_h = int(height * 0.28)
-        tips_w = width - chart_w - pad_side * 2 - 10
-        tips_h = int(height * 0.6)
+        left_w = int(width * 0.7)
+        right_w = width - left_w - margin * 2
+        tips_w = right_w
+        tips_h = height - margin * 2
+        heading_h = 48
+        score_h = 64
+        radar_h = tips_h - heading_h - score_h - margin * 2
+        radar_w = left_w - margin * 2
         return {
             'width': width,
             'height': height,
-            'pad_side': pad_side,
-            'chart_w': chart_w,
-            'chart_h': chart_h,
+            'margin': margin,
+            'left_w': left_w,
+            'right_w': right_w,
             'tips_w': tips_w,
-            'tips_h': tips_h
+            'tips_h': tips_h,
+            'heading_h': heading_h,
+            'score_h': score_h,
+            'radar_w': radar_w,
+            'radar_h': radar_h
         }
 
     def _build_ui(self, sw, sh):
         dims = self._get_layout_dimensions(sw, sh)
         self.width = dims['width']
         self.height = dims['height']
-        chart_w = dims['chart_w']
-        chart_h = dims['chart_h']
+        margin = dims['margin']
+        left_w = dims['left_w']
+        right_w = dims['right_w']
         tips_w = dims['tips_w']
         tips_h = dims['tips_h']
+        heading_h = dims['heading_h']
+        score_h = dims['score_h']
+        radar_w = dims['radar_w']
+        radar_h = dims['radar_h']
         dd_measure_w = 200
         dd_section_w = 220
         dd_pass_w = 140
@@ -118,15 +129,9 @@ class AnalyticsPopup:
         pass_options = [f"Pass {p}" for p in sorted(self.pass_map[self._selected_measure][self._selected_section].keys())] if self._selected_measure is not None and self._selected_section is not None and self.pass_map.get(self._selected_measure, {}).get(self._selected_section) else ['—']
         starting_pass = f"Pass {self._selected_pass}" if self._selected_pass else pass_options[0]
         self.dd_pass = self._create_dropdown(pass_options, starting_pass, dd_pass_w, '#analytics_dd_pass')
-        self.img_bar = pygame_gui.elements.UIImage(
-            relative_rect=pygame.Rect(0, 0, chart_w, chart_h),
-            image_surface=pygame.Surface((chart_w, chart_h), pygame.SRCALPHA),
-            manager=self.ui_manager,
-            object_id='#analytics_img_bar'
-        )
         self.img_spider = pygame_gui.elements.UIImage(
-            relative_rect=pygame.Rect(0, 0, chart_w, chart_h),
-            image_surface=pygame.Surface((chart_w, chart_h), pygame.SRCALPHA),
+            relative_rect=pygame.Rect(0, 0, radar_w, radar_h),
+            image_surface=pygame.Surface((radar_w, radar_h), pygame.SRCALPHA),
             manager=self.ui_manager,
             object_id='#analytics_img_spider'
         )
@@ -136,7 +141,6 @@ class AnalyticsPopup:
             manager=self.ui_manager,
             object_id='#analytics_tips_box'
         )
-        self._refresh_charts_and_tips()
 
     def _rebuild_section_dropdown(self):
         if self.dd_section is not None:
@@ -197,12 +201,8 @@ class AnalyticsPopup:
 
     def _refresh_charts_and_tips(self):
         analytics = self._get_selected_analytics()
-        if self.window is None:
-            return
-        bar_rect = self.img_bar.rect
         spider_rect = self.img_spider.rect
-        content_w = bar_rect.width
-        bar_h = bar_rect.height
+        content_w = spider_rect.width
         spider_h = spider_rect.height
         if analytics:
             spider_chart = self._matplotlib_spider_chart(analytics, width=content_w, height=spider_h)
@@ -210,7 +210,6 @@ class AnalyticsPopup:
             tips_html = self._generate_tips_html(analytics)
             self.tips_box.set_text(tips_html)
         else:
-            self.img_bar.set_image(pygame.Surface((content_w, bar_h), pygame.SRCALPHA))
             self.img_spider.set_image(pygame.Surface((content_w, spider_h), pygame.SRCALPHA))
             self.tips_box.set_text('<b>No analytics available yet.</b>')
 
@@ -245,47 +244,64 @@ class AnalyticsPopup:
         if self.font is None:
             self.font = pygame.font.SysFont('Arial', 22)
             self.small_font = pygame.font.SysFont('Arial', 16)
+            self.big_font = pygame.font.SysFont('Arial', 48, bold=True)
         sw, sh = surface.get_size()
         if self.ui_manager.window_resolution != (sw, sh):
             self.ui_manager.set_window_resolution((sw, sh))
         dims = self._get_layout_dimensions(sw, sh)
         self.width = dims['width']
         self.height = dims['height']
-        pad = 32
-        pad_top = pad
-        pad_side = pad
+        margin = dims['margin']
+        left_w = dims['left_w']
+        right_w = dims['right_w']
+        tips_w = dims['tips_w']
+        tips_h = dims['tips_h']
+        heading_h = dims['heading_h']
+        score_h = dims['score_h']
+        radar_w = dims['radar_w']
+        radar_h = dims['radar_h']
         x = (sw - self.width) // 2
         y = (sh - self.height) // 4
+        # Draw background
         pygame.draw.rect(surface, (30, 30, 30), (x, y, self.width, self.height), border_radius=16)
         pygame.draw.rect(surface, (200, 200, 200), (x, y, self.width, self.height), 2, border_radius=16)
-        if self.dd_measure is None or self.dd_section is None or self.dd_pass is None or self.img_spider is None or self.tips_box is None:
+        # Build UI if needed
+        ui_was_none = self.dd_measure is None or self.dd_section is None or self.dd_pass is None or self.img_spider is None or self.tips_box is None
+        if ui_was_none:
             self._build_ui(sw, sh)
+            self._refresh_charts_and_tips()
+        # Left column positions
+        left_x = x + margin
+        left_y = y + margin
+        # Heading and dropdowns
         title_surf = self.font.render('Performance Analytics for', True, (255, 255, 255))
-        title_x = x + pad_side
-        title_y = y + pad_top
-        surface.blit(title_surf, (title_x, title_y))
-        dd_y = title_y
-        dd_x = title_x + title_surf.get_width() + 12
+        surface.blit(title_surf, (left_x, left_y))
+        dd_y = left_y
+        dd_x = left_x + title_surf.get_width() + 12
         self.dd_measure.set_relative_position((dd_x, dd_y))
         dd_x += self.dd_measure.rect.width + 12
         self.dd_section.set_relative_position((dd_x, dd_y))
         dd_x += self.dd_section.rect.width + 12
         self.dd_pass.set_relative_position((dd_x, dd_y))
-        chart_pad_top = pad_top + 40
-        chart_x = x + pad_side
-        chart_w = dims['chart_w']
-        chart_h = dims['chart_h']
-        self.img_bar.set_dimensions((chart_w, chart_h))
-        self.img_bar.set_relative_position((chart_x, y + chart_pad_top))
-        spider_y = y + chart_pad_top + chart_h + 20
-        self.img_spider.set_dimensions((chart_w, chart_h))
-        self.img_spider.set_relative_position((chart_x, spider_y))
-        tips_x = chart_x + chart_w + 24
-        tips_y = y + chart_pad_top
-        tips_w = dims['tips_w']
-        tips_h = dims['tips_h']
+        # Overall score
+        analytics = self._get_selected_analytics()
+        score_val = analytics.get('accuracy', None)
+        score_text = f"Overall Score: {score_val:.2f}" if score_val is not None else "Overall Score: —"
+        score_surf = self.big_font.render(score_text, True, (80, 200, 120) if score_val and score_val >= 0.8 else (255, 120, 120))
+        score_x = left_x
+        score_y = left_y + heading_h + margin // 2
+        surface.blit(score_surf, (score_x, score_y))
+        # Radar graph
+        radar_x = left_x
+        radar_y = score_y + score_h + margin // 2
+        self.img_spider.set_dimensions((radar_w, radar_h))
+        self.img_spider.set_relative_position((radar_x, radar_y))
+        # Tips box (right column)
+        tips_x = x + left_w + margin
+        tips_y = y + margin
         self.tips_box.set_relative_position((tips_x, tips_y))
         self.tips_box.set_dimensions((tips_w, tips_h))
+        # UI update/draw
         now = pygame.time.get_ticks()
         dt = max(0, now - self._last_update_ms) / 1000.0
         self._last_update_ms = now
@@ -310,7 +326,7 @@ class AnalyticsPopup:
         ax.plot(angles, values, 'o-', linewidth=2, color='#50c878')
         ax.fill(angles, values, alpha=0.25, color='#50c878')
         ax.set_ylim(0, 1)
-        ax.set_title('Radar (Spider) Graph', y=1.1, color='white')
+        ax.set_title('Radar Graph', y=1.1, color='white')
         ax.grid(True, color='white', alpha=0.3)
         ax.tick_params(colors='white')
         fig.patch.set_alpha(0)
@@ -322,35 +338,3 @@ class AnalyticsPopup:
         buf.seek(0)
         img = pygame.image.load(buf, 'spider_chart.png').convert_alpha()
         return img
-
-    def _draw_per_chord(self, surface, x, y, analytics, width=400, height=60):
-        per = analytics.get('per_chord', []) if analytics else []
-        interval_diffs = analytics.get('interval_diffs', []) if analytics else []
-        n = len(per)
-        if not per or n == 0:
-            return
-        max_w = width
-        ref_bar_h = int(height * 0.7)
-        ref_bar_w = max(8, min(30, max_w // max(1, n)))
-        timing_accuracies = [1.0 - min(1.0, abs(d)) for d in interval_diffs] + [1.0]
-        timing_accuracies = [max(0.0, min(1.0, t)) for t in timing_accuracies]
-        for i in range(n):
-            bx = x + i * (ref_bar_w + 2)
-            by = y
-            ref_rect = pygame.Rect(bx, by, ref_bar_w, ref_bar_h)
-            pygame.draw.rect(surface, (180, 180, 180), ref_rect)
-        for i, info in enumerate(per):
-            acc = info.get('score', 0)
-            timing = timing_accuracies[i] if i < len(timing_accuracies) else 1.0
-            bar_h = int(acc * ref_bar_h)
-            bar_w = int(ref_bar_w * timing)
-            bx = x + i * (ref_bar_w + 2) + (ref_bar_w - bar_w) // 2
-            by = y + ref_bar_h - bar_h
-            user_surf = pygame.Surface((bar_w, bar_h), pygame.SRCALPHA)
-            color = (80, 200, 120, 50) if acc > 0.8 else (255, 120, 120, 50)
-            user_surf.fill(color)
-            surface.blit(user_surf, (bx, by))
-            idx_txt = self.small_font.render(str(i + 1), True, (255, 255, 255))
-            surface.blit(idx_txt, (x + i * (ref_bar_w + 2) + 2, y + ref_bar_h + 4))
-        label = self.small_font.render('Per-chord accuracy (height=accuracy, width=timing)', True, (255, 255, 255))
-        surface.blit(label, (x, y + ref_bar_h + 24))
