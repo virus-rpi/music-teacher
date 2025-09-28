@@ -93,9 +93,11 @@ class AnalyticsPopup:
         tips_h = height - margin * 2
         heading_h = 48
         score_h = 40
-        radar_h = tips_h - heading_h - score_h - margin * 2
+        # Split left column vertically: radar and pianoroll each get half
+        left_h = height - margin * 2
+        radar_h = int(left_h * 0.5) - margin // 2
+        pianoroll_h = int(left_h * 0.5) - margin // 2
         radar_w = left_w - margin * 2
-        pianoroll_h = int((height - margin * 3) * 0.5)
         return {
             'width': width,
             'height': height,
@@ -119,6 +121,7 @@ class AnalyticsPopup:
         tips_h = dims['tips_h']
         radar_w = dims['radar_w']
         radar_h = dims['radar_h']
+        pianoroll_h = dims['pianoroll_h']
         dd_measure_w = 200
         dd_section_w = 220
         dd_pass_w = 140
@@ -138,8 +141,8 @@ class AnalyticsPopup:
             object_id='#analytics_img_spider'
         )
         self.img_pianoroll = pygame_gui.elements.UIImage(
-            relative_rect=pygame.Rect(0, 0, radar_w, dims['pianoroll_h']),
-            image_surface=pygame.Surface((radar_w, dims['pianoroll_h']), pygame.SRCALPHA),
+            relative_rect=pygame.Rect(0, 0, radar_w, pianoroll_h),
+            image_surface=pygame.Surface((radar_w, pianoroll_h), pygame.SRCALPHA),
             manager=self.ui_manager,
             object_id='#analytics_img_pianoroll'
         )
@@ -316,15 +319,13 @@ class AnalyticsPopup:
         self.ui_manager.update(dt)
         self.ui_manager.draw_ui(surface)
 
-    @staticmethod
-    def _matplotlib_spider_chart(analytics, width=300, height=200):
+    def _matplotlib_spider_chart(self, analytics, width=300, height=200):
         labels = np.array(['Accuracy', 'Relative', 'Absolute', 'Legato'])
-        legato_score = 1.0 - analytics.get('legato_severity', 0)
         values = np.array([
             analytics.get('accuracy', 0),
             analytics.get('relative', 0),
             analytics.get('absolute', 0),
-            legato_score
+            1.0 - analytics.get('legato_severity', 0)
         ])
         values = np.append(values, values[0])
         angles = np.linspace(0, 2 * np.pi, len(labels), endpoint=False)
@@ -334,9 +335,11 @@ class AnalyticsPopup:
         ax.plot(angles, values, 'o-', linewidth=2, color='#50c878')
         ax.fill(angles, values, alpha=0.25, color='#50c878')
         ax.set_ylim(0, 1)
-        ax.set_title('Radar Graph', y=1.1, color='white')
+        ax.set_title('Performance Metrics', y=1.1, color='white')
         ax.grid(True, color='white', alpha=0.3)
         ax.tick_params(colors='white')
+        ax.set_xticks(angles[:-1])
+        ax.set_xticklabels(labels, color='white', fontsize=10)
         fig.patch.set_alpha(0)
         ax.set_facecolor((0, 0, 0, 0))
         plt.tight_layout()
