@@ -93,11 +93,12 @@ class AnalyticsPopup:
         tips_h = height - margin * 2
         heading_h = 48
         score_h = 40
-        # Split left column vertically: radar and pianoroll each get half
         left_h = height - margin * 2
+        # Use full left column width for radar and pianoroll
+        radar_w = left_w
         radar_h = int(left_h * 0.5) - margin // 2
+        pianoroll_w = left_w
         pianoroll_h = int(left_h * 0.5) - margin // 2
-        radar_w = left_w - margin * 2
         return {
             'width': width,
             'height': height,
@@ -110,6 +111,7 @@ class AnalyticsPopup:
             'score_h': score_h,
             'radar_w': radar_w,
             'radar_h': radar_h,
+            'pianoroll_w': pianoroll_w,
             'pianoroll_h': pianoroll_h
         }
 
@@ -212,20 +214,22 @@ class AnalyticsPopup:
 
     def _refresh_charts_and_tips(self):
         analytics = self._get_selected_analytics()
-        spider_rect = self.img_spider.rect
-        content_w = spider_rect.width
-        spider_h = spider_rect.height
+        dims = self._get_layout_dimensions(self.width, self.height)
+        radar_w = dims['left_w']
+        radar_h = self.img_spider.rect.height
+        pianoroll_w = dims['left_w']
+        pianoroll_h = self.img_pianoroll.rect.height
         if analytics:
-            spider_chart = self._matplotlib_spider_chart(analytics, width=content_w, height=spider_h)
+            spider_chart = self._matplotlib_spider_chart(analytics, width=radar_w, height=radar_h)
             self.img_spider.set_image(spider_chart)
             tips_html = self._generate_tips_html(analytics)
             self.tips_box.set_text(tips_html)
-            pianoroll_image = self._render_pianoroll(analytics, width=content_w, height=self.img_pianoroll.rect.height)
+            pianoroll_image = self._render_pianoroll(analytics, width=pianoroll_w, height=pianoroll_h)
             self.img_pianoroll.set_image(pianoroll_image)
         else:
-            self.img_spider.set_image(pygame.Surface((content_w, spider_h), pygame.SRCALPHA))
+            self.img_spider.set_image(pygame.Surface((radar_w, radar_h), pygame.SRCALPHA))
             self.tips_box.set_text('<b>No analytics available yet.</b>')
-            self.img_pianoroll.set_image(pygame.Surface((content_w, self.img_pianoroll.rect.height), pygame.SRCALPHA))
+            self.img_pianoroll.set_image(pygame.Surface((pianoroll_w, pianoroll_h), pygame.SRCALPHA))
 
     @staticmethod
     def _generate_tips_html(analytics):
@@ -255,7 +259,8 @@ class AnalyticsPopup:
     def _draw_left_column(self, surface, dims, analytics):
         left_x = (surface.get_width() - dims['width']) // 2 + dims['margin']
         left_y = (surface.get_height() - dims['height']) // 4 + dims['margin']
-
+        left_h = dims['height'] - 2 * dims['margin']
+        # Title and dropdowns
         title_surf = self.font.render('Performance Analytics for', True, (255, 255, 255))
         surface.blit(title_surf, (left_x, left_y))
         dd_y = left_y
@@ -265,7 +270,7 @@ class AnalyticsPopup:
         self.dd_section.set_relative_position((dd_x, dd_y))
         dd_x += self.dd_section.rect.width + 12
         self.dd_pass.set_relative_position((dd_x, dd_y))
-
+        # Score
         score_val = analytics.get('score', None).get('overall', None) if analytics and analytics.get('score') else None
         if score_val is not None:
             score_text = f"Overall Score: {score_val * 100:.0f}%"
@@ -274,17 +279,31 @@ class AnalyticsPopup:
         score_color = (80, 200, 120) if score_val and score_val >= 0.8 else (255, 120, 120)
         score_surf = self.big_font.render(score_text, True, score_color)
         score_x = left_x
-        score_y = left_y + dims['heading_h'] + dims['margin'] // 2
+        score_y = left_y + title_surf.get_height() + 8
         surface.blit(score_surf, (score_x, score_y))
-
+        # Calculate available height for radar and pianoroll
+        used_height = title_surf.get_height() + 8 + score_surf.get_height() + 8
+        available_h = left_h - used_height
+        min_radar_h = 120
+        min_pianoroll_h = 120
+        # Split available space: 60% radar, 40% pianoroll, but respect minimums
+        radar_h = max(min_radar_h, int(available_h * 0.6))
+        pianoroll_h = max(min_pianoroll_h, available_h - radar_h)
+        # If not enough space, shrink both equally but not below minimum
+        total_needed = radar_h + pianoroll_h
+        if total_needed > available_h:
+            excess = total_needed - available_h
+            shrink = excess // 2
+            radar_h = max(min_radar_h, radar_h - shrink)
+            pianoroll_h = max(min_pianoroll_h, pianoroll_h - shrink)
         radar_x = left_x
-        radar_y = score_y + dims['score_h'] + dims['margin'] // 2
-        self.img_spider.set_dimensions((dims['radar_w'], dims['radar_h']))
+        radar_y = left_y + used_height
+        self.img_spider.set_dimensions((dims['radar_w'], radar_h))
         self.img_spider.set_relative_position((radar_x, radar_y))
-
-        pianoroll_y = radar_y + dims['radar_h'] + dims['margin']
-        self.img_pianoroll.set_dimensions((dims['radar_w'], dims['pianoroll_h']))
-        self.img_pianoroll.set_relative_position((radar_x, pianoroll_y))
+        pianoroll_x = left_x
+        pianoroll_y = radar_y + radar_h
+        self.img_pianoroll.set_dimensions((dims['pianoroll_w'], pianoroll_h))
+        self.img_pianoroll.set_relative_position((pianoroll_x, pianoroll_y))
 
     def draw(self, surface):
         if not self.visible:
@@ -351,13 +370,16 @@ class AnalyticsPopup:
         return img
 
     def _render_pianoroll(self, analytics, width=300, height=200):
+        margin_x = 10
+        margin_y = 10
+        draw_w = width - 2 * margin_x
+        draw_h = height - 2 * margin_y
         # Get expected notes from teacher
         expected_notes = []
         if self._selected_measure is not None:
             try:
                 chords, times, xs, _, _ = self.teacher.midi_teacher.get_notes_for_measure(self._selected_measure)
                 for chord, time in zip(chords, times):
-                    # Flatten chord to individual notes
                     if isinstance(chord, (list, tuple)):
                         for note in chord:
                             expected_notes.append({'note': note, 'start': time, 'duration': 0.5})
@@ -365,7 +387,6 @@ class AnalyticsPopup:
                         expected_notes.append({'note': chord, 'start': time, 'duration': 0.5})
             except Exception:
                 pass
-        # Get performed notes from MIDI file
         performed_notes = []
         if self.pass_map and self._selected_measure is not None and self._selected_section is not None and self._selected_pass is not None:
             json_path = self.pass_map[self._selected_measure][self._selected_section][self._selected_pass]
@@ -380,53 +401,60 @@ class AnalyticsPopup:
                         performed_notes.append({'note': msg.note, 'start': abs_time, 'duration': 0.5})
             except Exception:
                 pass
-        # Visualization
         img = pygame.Surface((width, height), pygame.SRCALPHA)
-        img.fill((0, 0, 0, 0))
+        img.fill((30, 30, 30, 255))
+        pygame.draw.rect(img, (0, 200, 255), (0, 0, width-1, height-1), 2)
         all_notes = [n['note'] for n in expected_notes if isinstance(n['note'], int)] + [n['note'] for n in performed_notes if isinstance(n['note'], int)]
         if not all_notes:
-            # Draw debug border to confirm pianoroll is visible
-            pygame.draw.rect(img, (255, 0, 255), (0, 0, width-1, height-1), 2)
             font = pygame.font.SysFont('Arial', 18)
             txt = font.render('No notes to display', True, (255, 0, 255))
             img.blit(txt, (10, 10))
             return img
-        # Map notes to y positions
         min_note = min(all_notes)
         max_note = max(all_notes)
-        note_range = max_note - min_note + 1
-        def note_to_y(note):
-            return int(height - ((note - min_note) / note_range) * height)
-        # Map time to x positions
+        note_range = max(1, max_note - min_note)
         all_starts = [n['start'] for n in expected_notes] + [n['start'] for n in performed_notes]
         min_start = min(all_starts)
         max_start = max(all_starts)
-        time_range = max_start - min_start if max_start > min_start else 1
+        time_range = max(0.01, max_start - min_start)
+        # Debug prints
+        print(f"Pianoroll: min_note={min_note}, max_note={max_note}, min_start={min_start}, max_start={max_start}")
+        # Rectangle size: fit max 32 notes vertically, 32 events horizontally
+        note_h = max(8, draw_h // max(32, note_range))
+        note_w = max(8, draw_w // max(32, len(all_starts)))
+        def clamp(val, minv, maxv):
+            return max(minv, min(val, maxv))
+        def note_to_y(note):
+            y = margin_y + draw_h - ((note - min_note) / note_range) * draw_h - note_h/2
+            return int(clamp(y, margin_y, height - margin_y - note_h))
         def time_to_x(start):
-            return int(((start - min_start) / time_range) * (width - 40)) + 20
-        # Draw expected notes (green)
+            x = margin_x + ((start - min_start) / time_range) * draw_w - note_w/2
+            return int(clamp(x, margin_x, width - margin_x - note_w))
+        # Draw grid lines for time and pitch
+        for i in range(5):
+            tx = margin_x + i * draw_w // 4
+            pygame.draw.line(img, (80,80,80), (tx, margin_y), (tx, height-margin_y), 1)
+        for i in range(5):
+            ty = margin_y + i * draw_h // 4
+            pygame.draw.line(img, (80,80,80), (margin_x, ty), (width-margin_x, ty), 1)
+        # Draw expected notes (green, semi-transparent)
         for n in expected_notes:
             if not isinstance(n['note'], int):
                 continue
             x = time_to_x(n['start'])
             y = note_to_y(n['note'])
-            w = 8
-            h = 12
-            pygame.draw.rect(img, (0, 200, 0), (x, y, w, h))
-        # Draw performed notes (red or yellow if timing error)
+            pygame.draw.rect(img, (0, 200, 0, 120), (x, y, note_w, note_h))
+        # Draw performed notes (red or yellow if timing error, more opaque)
         for pn in performed_notes:
             if not isinstance(pn['note'], int):
                 continue
             x = time_to_x(pn['start'])
             y = note_to_y(pn['note'])
-            w = 8
-            h = 12
-            # Check for matching expected note
             match = next((en for en in expected_notes if en['note'] == pn['note']), None)
             if match:
                 timing_error = abs(match['start'] - pn['start']) > 0.2
-                color = (220, 220, 0) if timing_error else (220, 0, 0)
+                color = (220, 220, 0, 200) if timing_error else (220, 0, 0, 200)
             else:
-                color = (220, 0, 0)
-            pygame.draw.rect(img, color, (x, y, w, h))
+                color = (220, 0, 0, 200)
+            pygame.draw.rect(img, color, (x, y, note_w, note_h))
         return img
