@@ -33,6 +33,9 @@ class AnalyticsPopup:
         self._selected_measure = None
         self._selected_section = None
         self._selected_pass = None
+        self.font = pygame.font.SysFont('Arial', 22)
+        self.small_font = pygame.font.SysFont('Arial', 18)
+        self.big_font = pygame.font.SysFont('Arial', 28, bold=True)
 
     def toggle(self):
         self.visible = not self.visible
@@ -42,7 +45,7 @@ class AnalyticsPopup:
             self._reset_ui_elements()
 
     def _reset_ui_elements(self):
-        for attr in ['window', 'dd_measure', 'dd_section', 'dd_pass', 'img_bar', 'img_spider', 'tips_box']:
+        for attr in ['dd_measure', 'dd_section', 'dd_pass', 'img_spider', 'tips_box']:
             obj = getattr(self, attr, None)
             if obj is not None:
                 if hasattr(obj, 'kill'):
@@ -87,7 +90,7 @@ class AnalyticsPopup:
         tips_w = right_w
         tips_h = height - margin * 2
         heading_h = 48
-        score_h = 64
+        score_h = 40
         radar_h = tips_h - heading_h - score_h - margin * 2
         radar_w = left_w - margin * 2
         return {
@@ -108,13 +111,8 @@ class AnalyticsPopup:
         dims = self._get_layout_dimensions(sw, sh)
         self.width = dims['width']
         self.height = dims['height']
-        margin = dims['margin']
-        left_w = dims['left_w']
-        right_w = dims['right_w']
         tips_w = dims['tips_w']
         tips_h = dims['tips_h']
-        heading_h = dims['heading_h']
-        score_h = dims['score_h']
         radar_w = dims['radar_w']
         radar_h = dims['radar_h']
         dd_measure_w = 200
@@ -238,42 +236,10 @@ class AnalyticsPopup:
         list_items = ''.join([f'- {t} <br/>' for t in tips])
         return f'<b>Tips:</b><br/>{list_items}'
 
-    def draw(self, surface):
-        if not self.visible:
-            return
-        if self.font is None:
-            self.font = pygame.font.SysFont('Arial', 22)
-            self.small_font = pygame.font.SysFont('Arial', 16)
-            self.big_font = pygame.font.SysFont('Arial', 48, bold=True)
-        sw, sh = surface.get_size()
-        if self.ui_manager.window_resolution != (sw, sh):
-            self.ui_manager.set_window_resolution((sw, sh))
-        dims = self._get_layout_dimensions(sw, sh)
-        self.width = dims['width']
-        self.height = dims['height']
-        margin = dims['margin']
-        left_w = dims['left_w']
-        right_w = dims['right_w']
-        tips_w = dims['tips_w']
-        tips_h = dims['tips_h']
-        heading_h = dims['heading_h']
-        score_h = dims['score_h']
-        radar_w = dims['radar_w']
-        radar_h = dims['radar_h']
-        x = (sw - self.width) // 2
-        y = (sh - self.height) // 4
-        # Draw background
-        pygame.draw.rect(surface, (30, 30, 30), (x, y, self.width, self.height), border_radius=16)
-        pygame.draw.rect(surface, (200, 200, 200), (x, y, self.width, self.height), 2, border_radius=16)
-        # Build UI if needed
-        ui_was_none = self.dd_measure is None or self.dd_section is None or self.dd_pass is None or self.img_spider is None or self.tips_box is None
-        if ui_was_none:
-            self._build_ui(sw, sh)
-            self._refresh_charts_and_tips()
-        # Left column positions
-        left_x = x + margin
-        left_y = y + margin
-        # Heading and dropdowns
+    def _draw_left_column(self, surface, dims, analytics):
+        left_x = (surface.get_width() - dims['width']) // 2 + dims['margin']
+        left_y = (surface.get_height() - dims['height']) // 4 + dims['margin']
+
         title_surf = self.font.render('Performance Analytics for', True, (255, 255, 255))
         surface.blit(title_surf, (left_x, left_y))
         dd_y = left_y
@@ -283,25 +249,50 @@ class AnalyticsPopup:
         self.dd_section.set_relative_position((dd_x, dd_y))
         dd_x += self.dd_section.rect.width + 12
         self.dd_pass.set_relative_position((dd_x, dd_y))
-        # Overall score
-        analytics = self._get_selected_analytics()
+
         score_val = analytics.get('accuracy', None)
-        score_text = f"Overall Score: {score_val:.2f}" if score_val is not None else "Overall Score: —"
-        score_surf = self.big_font.render(score_text, True, (80, 200, 120) if score_val and score_val >= 0.8 else (255, 120, 120))
+        if score_val is not None:
+            score_text = f"Overall Score: {score_val:.2f}"
+        else:
+            score_text = "Overall Score: —"
+        score_color = (80, 200, 120) if score_val and score_val >= 0.8 else (255, 120, 120)
+        score_surf = self.big_font.render(score_text, True, score_color)
         score_x = left_x
-        score_y = left_y + heading_h + margin // 2
+        score_y = left_y + dims['heading_h'] + dims['margin'] // 2
         surface.blit(score_surf, (score_x, score_y))
-        # Radar graph
+
         radar_x = left_x
-        radar_y = score_y + score_h + margin // 2
-        self.img_spider.set_dimensions((radar_w, radar_h))
+        radar_y = score_y + dims['score_h'] + dims['margin'] // 2
+        self.img_spider.set_dimensions((dims['radar_w'], dims['radar_h']))
         self.img_spider.set_relative_position((radar_x, radar_y))
-        # Tips box (right column)
-        tips_x = x + left_w + margin
-        tips_y = y + margin
+
+    def draw(self, surface):
+        if not self.visible:
+            return
+        sw, sh = surface.get_size()
+        if self.ui_manager.window_resolution != (sw, sh):
+            self.ui_manager.set_window_resolution((sw, sh))
+        dims = self._get_layout_dimensions(sw, sh)
+        self.width = dims['width']
+        self.height = dims['height']
+        x = (sw - self.width) // 2
+        y = (sh - self.height) // 4
+
+        pygame.draw.rect(surface, (30, 30, 30), (x, y, self.width, self.height), border_radius=16)
+        pygame.draw.rect(surface, (200, 200, 200), (x, y, self.width, self.height), 2, border_radius=16)
+
+        ui_was_none = self.dd_measure is None or self.dd_section is None or self.dd_pass is None or self.img_spider is None or self.tips_box is None
+        if ui_was_none:
+            self._build_ui(sw, sh)
+            self._refresh_charts_and_tips()
+        analytics = self._get_selected_analytics()
+        self._draw_left_column(surface, dims, analytics)
+
+        tips_x = x + dims['left_w'] + dims['margin']
+        tips_y = y + dims['margin']
         self.tips_box.set_relative_position((tips_x, tips_y))
-        self.tips_box.set_dimensions((tips_w, tips_h))
-        # UI update/draw
+        self.tips_box.set_dimensions((dims['tips_w'], dims['tips_h']))
+
         now = pygame.time.get_ticks()
         dt = max(0, now - self._last_update_ms) / 1000.0
         self._last_update_ms = now
