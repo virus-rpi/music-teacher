@@ -261,3 +261,26 @@ class MidiTeacher:
         if 0 <= measure_index < len(self.measures):
             return self.measures[measure_index]
         return [], [], [], (0, 0), (0, 0)
+
+    def get_performed_notes_for_measure(self, measure_index, section, pass_num):
+        """Load performed notes from the corresponding MIDI file for a specific measure, section, and pass."""
+        if not self.save_system:
+            return []
+
+        try:
+            with self.save_system.guided_teacher_data as s:
+                midi_path = f"measure_{measure_index}/section_{section}/pass_{pass_num}.mid"
+                abs_path = s.get_absolute_path(midi_path)
+
+                # Load the MIDI file
+                mid = mido.MidiFile(abs_path)
+
+                # Extract all messages from the first track (if it exists)
+                if mid.tracks:
+                    return list(mid.tracks[0])
+                else:
+                    return []
+
+        except (FileNotFoundError, OSError, Exception) as e:
+            print(f"Failed to load performed notes for measure {measure_index}, section {section}, pass {pass_num}: {e}")
+            return []

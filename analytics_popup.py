@@ -1,5 +1,7 @@
 import json
 from collections import defaultdict
+from pprint import pprint
+
 import pygame
 import io
 import numpy as np
@@ -224,8 +226,8 @@ class AnalyticsPopup:
             self.img_spider.set_image(spider_chart)
             tips_html = self._generate_tips_html(analytics)
             self.tips_box.set_text(tips_html)
-            pianoroll_image = self._render_pianoroll(analytics, width=pianoroll_w, height=pianoroll_h)
-            self.img_pianoroll.set_image(pianoroll_image)
+            pianoroll_rect = self.img_pianoroll.rect.copy()
+            self._render_pianoroll(self.img_pianoroll.image, pianoroll_rect)
         else:
             self.img_spider.set_image(pygame.Surface((radar_w, radar_h), pygame.SRCALPHA))
             self.tips_box.set_text('<b>No analytics available yet.</b>')
@@ -369,92 +371,80 @@ class AnalyticsPopup:
         img = pygame.image.load(buf, 'spider_chart.png').convert_alpha()
         return img
 
-    def _render_pianoroll(self, analytics, width=300, height=200):
-        margin_x = 10
-        margin_y = 10
-        draw_w = width - 2 * margin_x
-        draw_h = height - 2 * margin_y
-        # Get expected notes from teacher
-        expected_notes = []
-        if self._selected_measure is not None:
-            try:
-                chords, times, xs, _, _ = self.teacher.midi_teacher.get_notes_for_measure(self._selected_measure)
-                for chord, time in zip(chords, times):
-                    if isinstance(chord, (list, tuple)):
-                        for note in chord:
-                            expected_notes.append({'note': note, 'start': time, 'duration': 0.5})
-                    else:
-                        expected_notes.append({'note': chord, 'start': time, 'duration': 0.5})
-            except Exception:
-                pass
-        performed_notes = []
-        if self.pass_map and self._selected_measure is not None and self._selected_section is not None and self._selected_pass is not None:
-            json_path = self.pass_map[self._selected_measure][self._selected_section][self._selected_pass]
-            midi_path = json_path.replace('.json', '.mid')
-            full_midi_path = str(self.save_system.guided_teacher_data.data_dir / midi_path)
-            try:
-                mid = mido.MidiFile(full_midi_path)
-                abs_time = 0
-                for msg in mid:
-                    abs_time += msg.time
-                    if msg.type == 'note_on' and msg.velocity > 0:
-                        performed_notes.append({'note': msg.note, 'start': abs_time, 'duration': 0.5})
-            except Exception:
-                pass
-        img = pygame.Surface((width, height), pygame.SRCALPHA)
-        img.fill((30, 30, 30, 255))
-        pygame.draw.rect(img, (0, 200, 255), (0, 0, width-1, height-1), 2)
-        all_notes = [n['note'] for n in expected_notes if isinstance(n['note'], int)] + [n['note'] for n in performed_notes if isinstance(n['note'], int)]
-        if not all_notes:
-            font = pygame.font.SysFont('Arial', 18)
-            txt = font.render('No notes to display', True, (255, 0, 255))
-            img.blit(txt, (10, 10))
-            return img
-        min_note = min(all_notes)
-        max_note = max(all_notes)
-        note_range = max(1, max_note - min_note)
-        all_starts = [n['start'] for n in expected_notes] + [n['start'] for n in performed_notes]
-        min_start = min(all_starts)
-        max_start = max(all_starts)
-        time_range = max(0.01, max_start - min_start)
-        # Debug prints
-        print(f"Pianoroll: min_note={min_note}, max_note={max_note}, min_start={min_start}, max_start={max_start}")
-        # Rectangle size: fit max 32 notes vertically, 32 events horizontally
-        note_h = max(8, draw_h // max(32, note_range))
-        note_w = max(8, draw_w // max(32, len(all_starts)))
-        def clamp(val, minv, maxv):
-            return max(minv, min(val, maxv))
-        def note_to_y(note):
-            y = margin_y + draw_h - ((note - min_note) / note_range) * draw_h - note_h/2
-            return int(clamp(y, margin_y, height - margin_y - note_h))
-        def time_to_x(start):
-            x = margin_x + ((start - min_start) / time_range) * draw_w - note_w/2
-            return int(clamp(x, margin_x, width - margin_x - note_w))
-        # Draw grid lines for time and pitch
-        for i in range(5):
-            tx = margin_x + i * draw_w // 4
-            pygame.draw.line(img, (80,80,80), (tx, margin_y), (tx, height-margin_y), 1)
-        for i in range(5):
-            ty = margin_y + i * draw_h // 4
-            pygame.draw.line(img, (80,80,80), (margin_x, ty), (width-margin_x, ty), 1)
-        # Draw expected notes (green, semi-transparent)
-        for n in expected_notes:
-            if not isinstance(n['note'], int):
-                continue
-            x = time_to_x(n['start'])
-            y = note_to_y(n['note'])
-            pygame.draw.rect(img, (0, 200, 0, 120), (x, y, note_w, note_h))
-        # Draw performed notes (red or yellow if timing error, more opaque)
-        for pn in performed_notes:
-            if not isinstance(pn['note'], int):
-                continue
-            x = time_to_x(pn['start'])
-            y = note_to_y(pn['note'])
-            match = next((en for en in expected_notes if en['note'] == pn['note']), None)
-            if match:
-                timing_error = abs(match['start'] - pn['start']) > 0.2
-                color = (220, 220, 0, 200) if timing_error else (220, 0, 0, 200)
-            else:
-                color = (220, 0, 0, 200)
-            pygame.draw.rect(img, color, (x, y, note_w, note_h))
-        return img
+    def _render_pianoroll(self, surface, rect):
+        """Draws a pianoroll comparison of expected vs performed notes."""
+        measure_data = self.teacher.midi_teacher.get_notes_for_measure(
+            self._selected_measure
+        )
+        expected_chords, expected_times, _, _, _ = measure_data
+        pprint(expected_times, expected_times)
+        performed_notes = self.teacher.midi_teacher.get_performed_notes_for_measure(
+            self._selected_measure, self._selected_section, self._selected_pass
+        )
+        pprint(performed_notes)
+
+        # Background
+        pygame.draw.rect(surface, (30, 30, 30), rect)
+        pygame.draw.rect(surface, (80, 80, 80), rect, 1)
+
+        if not expected_chords or (not expected_times and not performed_notes):
+            return
+
+        # --- Normalize pitch range ---
+        all_notes = [n for chord in expected_chords for (n, _) in chord]
+        if performed_notes:
+            all_notes += [msg.note for msg in performed_notes if msg.type in ("note_on", "note_off")]
+        min_pitch, max_pitch = min(all_notes), max(all_notes)
+        pitch_range = max_pitch - min_pitch + 1
+
+        def pitch_to_y(note):
+            """Map MIDI note -> vertical pixel coordinate inside rect."""
+            rel = (note - min_pitch) / max(1, pitch_range)
+            return rect.bottom - rel * rect.height
+
+        # --- Normalize expected times ---
+        exp_min = min(expected_times) if expected_times else 0
+        exp_max = max(expected_times) if expected_times else exp_min + 1
+        exp_range = exp_max - exp_min
+
+        def exp_time_to_x(tick):
+            """Map expected tick (relative to measure) -> x pixel coord."""
+            rel = (tick - exp_min) / max(1, exp_range)
+            return rect.left + rel * rect.width
+
+        # --- Normalize performed times ---
+        # mido track stores delta times in ms → convert to absolute ms
+        abs_time = 0
+        performed_abs = []
+        for msg in performed_notes:
+            abs_time += getattr(msg, "time", 0)
+            if msg.type in ("note_on", "note_off"):
+                performed_abs.append((abs_time, msg))
+
+        perf_min = min((t for t, _ in performed_abs), default=0)
+        perf_max = max((t for t, _ in performed_abs), default=perf_min + 1)
+        perf_range = perf_max - perf_min
+
+        def perf_time_to_x(ms):
+            rel = (ms - perf_min) / max(1, perf_range)
+            return rect.left + rel * rect.width
+
+        # --- Draw expected notes (green) ---
+        for chord, t in zip(expected_chords, expected_times):
+            x = exp_time_to_x(t)
+            for note, _ in chord:
+                y = pitch_to_y(note)
+                pygame.draw.rect(surface, (0, 200, 0), (x - 2, y - 3, 4, 6))
+
+        # --- Draw performed notes (red) ---
+        onsets = {}
+        for t, msg in performed_abs:
+            if msg.type == "note_on" and msg.velocity > 0:
+                onsets[msg.note] = t
+            elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
+                if msg.note in onsets:
+                    x1 = perf_time_to_x(onsets[msg.note])
+                    x2 = perf_time_to_x(t)
+                    y = pitch_to_y(msg.note)
+                    pygame.draw.rect(surface, (200, 50, 50), (x1, y - 2, max(1, x2 - x1), 4))
+                    del onsets[msg.note]
