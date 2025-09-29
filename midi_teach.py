@@ -269,10 +269,14 @@ class MidiTeacher:
             measure_midi_msgs = defaultdict(list)
             abs_tick = 0
             for track_index, track in enumerate(self.midi.tracks):
+                first_tick = None
                 for msg in track:
                     abs_tick += getattr(msg, 'time', 0)
                     if start_tick <= abs_tick < end_tick and msg.type in ('note_on', 'note_off'):
-                        measure_midi_msgs[track_index].append(msg.copy(time=abs_tick))
+                        if first_tick is None:
+                            first_tick = abs_tick
+                        measure_midi_msgs[track_index].append(msg.copy(time=abs_tick-first_tick))
+
             self.measures.append(MeasureData(
                 chords=tuple(measure_chords),
                 times=tuple(measure_chord_times),
