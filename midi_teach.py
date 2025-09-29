@@ -1,7 +1,19 @@
+from collections import defaultdict
+from dataclasses import dataclass
 import mido
 from sheet_music import SheetMusicRenderer
 from save_system import SaveSystem
 
+@dataclass
+class MeasureData:
+    chords: tuple[list[tuple[int, str]], ...]= ()
+    times: tuple[int, ...] = ()
+    xs: tuple[int, ...] = ()
+    start_x: int = 0
+    end_x: int = 0
+    start_index: int = 0
+    end_index: int = 0
+    midi_msgs: dict[int, list[mido.Message]] = ()
 
 class MidiTeacher:
     def __init__(self, midi_path, sheet_music_renderer: SheetMusicRenderer, save_system: SaveSystem = None):
@@ -16,7 +28,7 @@ class MidiTeacher:
         self.loop_start = 0
         self.loop_end = max(0, len(self.chords) - 1)
         self._last_wrapped = False
-        self.measures = []
+        self.measures: list[MeasureData] = []
         self._set_measure_data()
 
     def _extract_chords(self):
@@ -200,7 +212,7 @@ class MidiTeacher:
                 if msg.type == 'time_signature':
                     time_sig_changes.append((abs_tick, msg.numerator, msg.denominator))
         time_sig_changes.sort()
-        measure_boundaries = []
+        measure_boundaries: list[tuple[int, int]] = []
         current_tick = 0
         current_numerator = numerator
         current_denominator = denominator
@@ -227,48 +239,60 @@ class MidiTeacher:
         notehead_xs = self.sheet_music_renderer.notehead_xs
 
         measure_tick_boundaries = self._get_measure_tick_boundaries()
-        self.measures = []
+        self.measures: list[MeasureData] = []
         chord_times = self.chord_times
         chords = self.chords
         chord_idx = 0
         for i, measure_info in enumerate(measure_data):
             if measure_info is None or len(measure_info) != 3:
-                self.measures.append(([], [], [], (None, None), (0, 0), []))
+                self.measures.append(MeasureData())
                 continue
             start_x, end_x, _ = measure_info
             if i >= len(measure_tick_boundaries):
-                self.measures.append(([], [], [], (start_x, end_x), (chord_idx, chord_idx), []))
+                self.measures.append(MeasureData())
                 continue
             start_tick, end_tick = measure_tick_boundaries[i]
-            measure_chord_indices = []
+            measure_chord_indices: list[int] = []
             while chord_idx < len(chord_times) and chord_times[chord_idx] < end_tick:
                 if chord_times[chord_idx] >= start_tick:
                     measure_chord_indices.append(chord_idx)
                 chord_idx += 1
             measure_chords = [chords[j] for j in measure_chord_indices]
             measure_chord_times = [chord_times[j] - start_tick for j in measure_chord_indices]
-            measure_note_xs = [notehead_xs[j] for j in measure_chord_indices] if notehead_xs else []
+            measure_note_xs: list[int] = [notehead_xs[j] for j in measure_chord_indices] if notehead_xs else []
             if measure_chord_indices:
                 start_index = measure_chord_indices[0]
                 end_index = measure_chord_indices[-1] + 1
             else:
                 start_index = end_index = chord_idx
 
-            measure_midi_msgs = []
-            for track in self.midi.tracks:
-                first_time = None
+            measure_midi_msgs = defaultdict(list)
+            abs_tick = 0
+            for track_index, track in enumerate(self.midi.tracks):
                 for msg in track:
-                    if first_time is None:
-                        first_time = msg.time
-                    if start_tick <= msg.time < end_tick and msg.type in ('note_on', 'note_off'):
-                        measure_midi_msgs.append(msg.copy(time=msg.time - first_time))
-            self.measures.append((measure_chords, measure_chord_times, measure_note_xs, (start_x, end_x), (start_index, end_index), measure_midi_msgs))
+                    abs_tick += getattr(msg, 'time', 0)
+                    if start_tick <= abs_tick < end_tick and msg.type in ('note_on', 'note_off'):
+                        measure_midi_msgs[track_index].append(msg.copy(time=abs_tick))
+            self.measures.append(MeasureData(
+                chords=tuple(measure_chords),
+                times=tuple(measure_chord_times),
+                xs=tuple(measure_note_xs),
+                start_x=start_x,
+                end_x=end_x,
+                start_index=start_index,
+                end_index=end_index,
+                midi_msgs=dict(measure_midi_msgs),
+            ))
 
-    def get_notes_for_measure(self, measure_index) -> tuple[list, list, list, tuple[int, int], tuple[int, int], list]:
+    def get_notes_for_measure(self, measure_index, unpacked=True) -> tuple[tuple, tuple, tuple, tuple[int, int], tuple[int, int], dict[int, list[mido.Message]]] | MeasureData:
         """Returns (chords, times, note_xs, (start_x, end_x), (start_index, end_index), midi_msgs) for the given measure index."""
         if 0 <= measure_index < len(self.measures):
-            return self.measures[measure_index]
-        return [], [], [], (0, 0), (0, 0), []
+            if unpacked:
+                measure_data = self.measures[measure_index]
+                return measure_data.chords, measure_data.times, measure_data.xs, (measure_data.start_x, measure_data.end_x), (measure_data.start_index, measure_data.end_index), measure_data.midi_msgs
+            else:
+                return self.measures[measure_index]
+        return (), (), (), (0, 0), (0, 0), {} if unpacked else MeasureData()
 
     def get_performed_notes_for_measure(self, measure_index, section, pass_num):
         """Load performed notes from the corresponding MIDI file for a specific measure, section, and pass."""
@@ -277,10 +301,7 @@ class MidiTeacher:
         try:
             with self.save_system.guided_teacher_data as s:
                 mid = mido.MidiFile(s.get_absolute_path(f"measure_{measure_index}/section_{section}/pass_{pass_num}.mid"))
-                if mid.tracks:
-                    return list(mid.tracks[0])
-                else:
-                    return []
+                return list(mid.tracks[0]) if mid.tracks else []
 
         except (FileNotFoundError, OSError, Exception) as e:
             print(f"Failed to load performed notes for measure {measure_index}, section {section}, pass {pass_num}: {e}")

@@ -375,20 +375,19 @@ class AnalyticsPopup:
     def _render_pianoroll(self, surface, rect):
         """Draws a pianoroll comparison of expected vs performed notes."""
         measure_data = self.teacher.midi_teacher.get_notes_for_measure(
-            self._selected_measure
+            self._selected_measure,
+            unpacked = False,
         )
-        expected_chords, expected_times, _, _, _, expected_midi_msgs = measure_data
+        expected_chords, expected_times, expected_midi_msgs = measure_data.chords, measure_data.times, measure_data.midi_msgs
         performed_notes = self.teacher.midi_teacher.get_performed_notes_for_measure(
             self._selected_measure, self._selected_section, self._selected_pass
         )
-        pprint(expected_midi_msgs)
-        pprint(performed_notes)
         # Background
         pygame.draw.rect(surface, (30, 30, 30), rect)
         pygame.draw.rect(surface, (80, 80, 80), rect, 1)
         if not expected_midi_msgs and not performed_notes:
             return
-        all_notes = [msg.note for msg in expected_midi_msgs if msg.type in ("note_on", "note_off")]
+        all_notes = [msg.note for track_index in range(len(expected_midi_msgs)) for msg in expected_midi_msgs[track_index] if msg.type in ("note_on", "note_off")]
         if performed_notes:
             all_notes += [msg.note for msg in performed_notes if msg.type in ("note_on", "note_off")]
         if not all_notes:
@@ -398,19 +397,35 @@ class AnalyticsPopup:
         def pitch_to_y(note):
             rel = (note - min_pitch) / max(1, pitch_range)
             return rect.bottom - rel * rect.height
-        # --- Draw expected notes (green) ---
+
+        expected_times_list = []
+        for track in expected_midi_msgs.values() if expected_midi_msgs else []:
+            for msg in track:
+                if hasattr(msg, "time"):
+                    expected_times_list.append(getattr(msg, "time", 0))
+        performed_times_list = [getattr(msg, "time", 0) for msg in performed_notes if hasattr(msg, "time")]
+        max_expected_time = max(expected_times_list) if expected_times_list else 1
+        max_performed_time = max(performed_times_list) if performed_times_list else 1
+        def expected_time_to_x(time):
+            norm = time / max_expected_time if max_expected_time > 0 else 0
+            return rect.left + norm * rect.width
+        def performed_time_to_x(time):
+            norm = time / max_performed_time if max_performed_time > 0 else 0
+            return rect.left + norm * rect.width
+
         expected_onsets = {}
-        for msg in expected_midi_msgs:
-            if msg.type == "note_on" and msg.velocity > 0:
-                expected_onsets[msg.note] = getattr(msg, "time", 0)
-            elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
-                onset = expected_onsets.pop(msg.note, None)
-                if onset is not None:
-                    x1 = rect.left + (onset / max(1, rect.width))
-                    x2 = rect.left + (getattr(msg, "time", 0) / max(1, rect.width))
-                    y = pitch_to_y(msg.note)
-                    pygame.draw.rect(surface, (0, 200, 0), pygame.Rect(x1, y - 4, max(1, x2 - x1), 8))
-        # --- Draw performed notes (red) ---
+        for track_index, track in enumerate(expected_midi_msgs.values() if expected_midi_msgs else []):
+            for msg in track:
+                if msg.type == "note_on" and msg.velocity > 0:
+                    expected_onsets[msg.note] = getattr(msg, "time", 0)
+                elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
+                    onset = expected_onsets.pop(msg.note, None)
+                    if onset is not None:
+                        x1 = expected_time_to_x(onset)
+                        x2 = expected_time_to_x(getattr(msg, "time", 0))
+                        y = pitch_to_y(msg.note)
+                        pygame.draw.rect(surface, (0, 0, 200) if track_index == 0 else (200, 0, 0), pygame.Rect(x1, y - 4, max(1, x2 - x1), 8))
+
         performed_onsets = {}
         for msg in performed_notes:
             if msg.type == "note_on" and msg.velocity > 0:
@@ -418,7 +433,7 @@ class AnalyticsPopup:
             elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
                 onset = performed_onsets.pop(msg.note, None)
                 if onset is not None:
-                    x1 = rect.left + (onset / max(1, rect.width))
-                    x2 = rect.left + (getattr(msg, "time", 0) / max(1, rect.width))
+                    x1 = performed_time_to_x(onset)
+                    x2 = performed_time_to_x(getattr(msg, "time", 0))
                     y = pitch_to_y(msg.note)
-                    pygame.draw.rect(surface, (200, 0, 0), pygame.Rect(x1, y - 4, max(1, x2 - x1), 8))
+                    pygame.draw.rect(surface, (0, 200, 0), pygame.Rect(x1, y - 4, max(1, x2 - x1), 8))
