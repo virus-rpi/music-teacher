@@ -49,7 +49,7 @@ class PlaybackMeasureTask(Task):
         self.played = False
 
     def on_start(self):
-        _, _, self.notes_x, _, _ = self.teacher.midi_teacher.get_notes_for_measure(self.measure)
+        _, _, self.notes_x, _, _, _ = self.teacher.midi_teacher.get_notes_for_measure(self.measure)
         self.teacher.current_section_visual_info = [self.notes_x[0], self.notes_x[-1]]
 
     def on_end(self):
@@ -209,7 +209,7 @@ class PracticeSectionTask(Task):
 
 class PracticeMeasureTask(PracticeSectionTask):
     def __init__(self, teacher: 'GuidedTeacher', measure):
-        chords, times, xs, _, (measure_start_index, _) = teacher.midi_teacher.get_notes_for_measure(measure)
+        chords, times, xs, _, (measure_start_index, _), _ = teacher.midi_teacher.get_notes_for_measure(measure)
         start_idx = measure_start_index
         end_idx = start_idx + len(chords) - 1 if chords else start_idx
         section = MeasureSection(chords, times, xs, start_idx, end_idx)
@@ -217,8 +217,8 @@ class PracticeMeasureTask(PracticeSectionTask):
 
 class PracticeTransitionTask(PracticeSectionTask):
     def __init__(self, teacher, from_measure, to_measure):
-        from_chords, from_times, from_xs, _, (from_start_idx, _) = teacher.midi_teacher.get_notes_for_measure(from_measure)
-        to_chords, to_times, to_xs, _, (to_start_idx, _) = teacher.midi_teacher.get_notes_for_measure(to_measure)
+        from_chords, from_times, from_xs, _, (from_start_idx, _), _ = teacher.midi_teacher.get_notes_for_measure(from_measure)
+        to_chords, to_times, to_xs, _, (to_start_idx, _), _ = teacher.midi_teacher.get_notes_for_measure(to_measure)
         section_chords = from_chords[-2:] + to_chords[:2]
         section_times = [0, from_times[-1] - from_times[-2]]  + [(from_times[-1] - from_times[-2])*2, to_times[1] + (from_times[-1] - from_times[-2])*2]
         section_xs = from_xs[-2:] + to_xs[:2]
@@ -393,7 +393,7 @@ class GuidedTeacher:
         self.save_state(force=True)
 
     def split_measure_into_sections(self, measure_index):
-        measure_chords, measure_times, measure_xs, _, (measure_start_index, _) = self.midi_teacher.get_notes_for_measure(measure_index)
+        measure_chords, measure_times, measure_xs, _, (measure_start_index, _), _ = self.midi_teacher.get_notes_for_measure(measure_index)
         if not measure_chords:
             return []
 

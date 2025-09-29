@@ -1,15 +1,16 @@
+import io
 import json
+import re
 from collections import defaultdict
 from pprint import pprint
 
-import pygame
-import io
-import numpy as np
 import matplotlib
-from save_system import SaveSystem
-import re
+import numpy as np
+import pygame
 from pygame_gui.core import ObjectID
-import mido
+
+from save_system import SaveSystem
+
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import pygame_gui
@@ -376,75 +377,48 @@ class AnalyticsPopup:
         measure_data = self.teacher.midi_teacher.get_notes_for_measure(
             self._selected_measure
         )
-        expected_chords, expected_times, _, _, _ = measure_data
-        pprint(expected_times, expected_times)
+        expected_chords, expected_times, _, _, _, expected_midi_msgs = measure_data
         performed_notes = self.teacher.midi_teacher.get_performed_notes_for_measure(
             self._selected_measure, self._selected_section, self._selected_pass
         )
+        pprint(expected_midi_msgs)
         pprint(performed_notes)
-
         # Background
         pygame.draw.rect(surface, (30, 30, 30), rect)
         pygame.draw.rect(surface, (80, 80, 80), rect, 1)
-
-        if not expected_chords or (not expected_times and not performed_notes):
+        if not expected_midi_msgs and not performed_notes:
             return
-
-        # --- Normalize pitch range ---
-        all_notes = [n for chord in expected_chords for (n, _) in chord]
+        all_notes = [msg.note for msg in expected_midi_msgs if msg.type in ("note_on", "note_off")]
         if performed_notes:
             all_notes += [msg.note for msg in performed_notes if msg.type in ("note_on", "note_off")]
+        if not all_notes:
+            return
         min_pitch, max_pitch = min(all_notes), max(all_notes)
         pitch_range = max_pitch - min_pitch + 1
-
         def pitch_to_y(note):
-            """Map MIDI note -> vertical pixel coordinate inside rect."""
             rel = (note - min_pitch) / max(1, pitch_range)
             return rect.bottom - rel * rect.height
-
-        # --- Normalize expected times ---
-        exp_min = min(expected_times) if expected_times else 0
-        exp_max = max(expected_times) if expected_times else exp_min + 1
-        exp_range = exp_max - exp_min
-
-        def exp_time_to_x(tick):
-            """Map expected tick (relative to measure) -> x pixel coord."""
-            rel = (tick - exp_min) / max(1, exp_range)
-            return rect.left + rel * rect.width
-
-        # --- Normalize performed times ---
-        # mido track stores delta times in ms → convert to absolute ms
-        abs_time = 0
-        performed_abs = []
-        for msg in performed_notes:
-            abs_time += getattr(msg, "time", 0)
-            if msg.type in ("note_on", "note_off"):
-                performed_abs.append((abs_time, msg))
-
-        perf_min = min((t for t, _ in performed_abs), default=0)
-        perf_max = max((t for t, _ in performed_abs), default=perf_min + 1)
-        perf_range = perf_max - perf_min
-
-        def perf_time_to_x(ms):
-            rel = (ms - perf_min) / max(1, perf_range)
-            return rect.left + rel * rect.width
-
         # --- Draw expected notes (green) ---
-        for chord, t in zip(expected_chords, expected_times):
-            x = exp_time_to_x(t)
-            for note, _ in chord:
-                y = pitch_to_y(note)
-                pygame.draw.rect(surface, (0, 200, 0), (x - 2, y - 3, 4, 6))
-
-        # --- Draw performed notes (red) ---
-        onsets = {}
-        for t, msg in performed_abs:
+        expected_onsets = {}
+        for msg in expected_midi_msgs:
             if msg.type == "note_on" and msg.velocity > 0:
-                onsets[msg.note] = t
+                expected_onsets[msg.note] = getattr(msg, "time", 0)
             elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
-                if msg.note in onsets:
-                    x1 = perf_time_to_x(onsets[msg.note])
-                    x2 = perf_time_to_x(t)
+                onset = expected_onsets.pop(msg.note, None)
+                if onset is not None:
+                    x1 = rect.left + (onset / max(1, rect.width))
+                    x2 = rect.left + (getattr(msg, "time", 0) / max(1, rect.width))
                     y = pitch_to_y(msg.note)
-                    pygame.draw.rect(surface, (200, 50, 50), (x1, y - 2, max(1, x2 - x1), 4))
-                    del onsets[msg.note]
+                    pygame.draw.rect(surface, (0, 200, 0), pygame.Rect(x1, y - 4, max(1, x2 - x1), 8))
+        # --- Draw performed notes (red) ---
+        performed_onsets = {}
+        for msg in performed_notes:
+            if msg.type == "note_on" and msg.velocity > 0:
+                performed_onsets[msg.note] = getattr(msg, "time", 0)
+            elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
+                onset = performed_onsets.pop(msg.note, None)
+                if onset is not None:
+                    x1 = rect.left + (onset / max(1, rect.width))
+                    x2 = rect.left + (getattr(msg, "time", 0) / max(1, rect.width))
+                    y = pitch_to_y(msg.note)
+                    pygame.draw.rect(surface, (200, 0, 0), pygame.Rect(x1, y - 4, max(1, x2 - x1), 8))
