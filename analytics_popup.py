@@ -214,20 +214,25 @@ class AnalyticsPopup:
     def _refresh_charts_and_tips(self):
         analytics = self._get_selected_analytics()
         dims = self._get_layout_dimensions(self.width, self.height)
-        radar_w = dims['left_w']
+        radar_w = dims['radar_w']
         radar_h = self.img_spider.rect.height
         pianoroll_w = dims['left_w']
         pianoroll_h = self.img_pianoroll.rect.height
         if analytics:
-            self.img_spider.set_image(self._matplotlib_spider_chart(analytics, width=radar_w, height=radar_h))
-            self._generate_tips_html(analytics)
-            self.tips_box.set_text(self._generate_tips_html(analytics))
-
+            # Always create the spider chart with the latest dimensions
+            print(f"Creating spider chart with size: {radar_w}x{radar_h}")
+            spider_chart = self._matplotlib_spider_chart(analytics, width=radar_w, height=radar_h)
+            self.img_spider.set_image(spider_chart)
+            self.img_spider.set_dimensions((radar_w, radar_h))
+            print(f"Set spider chart image with size: {spider_chart.get_width()}x{spider_chart.get_height()}")
+            tips_html = self._generate_tips_html(analytics)
+            self.tips_box.set_text(tips_html)
             pianoroll_surface = pygame.Surface((pianoroll_w, pianoroll_h), pygame.SRCALPHA)
             self._render_pianoroll(pianoroll_surface, pygame.Rect(0, 0, pianoroll_w, pianoroll_h))
             self.img_pianoroll.set_image(pianoroll_surface)
         else:
             self.img_spider.set_image(pygame.Surface((radar_w, radar_h), pygame.SRCALPHA))
+            self.img_spider.set_dimensions((radar_w, radar_h))
             self.tips_box.set_text('<b>No analytics available yet.</b>')
             self.img_pianoroll.set_image(pygame.Surface((pianoroll_w, pianoroll_h), pygame.SRCALPHA))
 
@@ -371,8 +376,7 @@ class AnalyticsPopup:
 
     def _render_pianoroll(self, surface, rect):
         surface.fill((0, 0, 0, 0))
-        pygame.draw.rect(surface, (30, 30, 30), rect)
-        pygame.draw.rect(surface, (80, 80, 80), rect, 1)
+        pygame.draw.rect(surface, (20, 20, 20), rect)
         measure_data = self.teacher.midi_teacher.get_notes_for_measure(
             self._selected_measure,
             unpacked = False,
@@ -390,10 +394,14 @@ class AnalyticsPopup:
             return
         min_pitch, max_pitch = min(all_notes), max(all_notes)
         pitch_range = max_pitch - min_pitch + 1
+        vertical_padding = 32
+        padded_top = rect.top + vertical_padding
+        padded_bottom = rect.bottom - vertical_padding
+        padded_height = padded_bottom - padded_top
+        bar_height = padded_height / pitch_range
         def pitch_to_y(note):
             rel = (note - min_pitch) / max(1, pitch_range)
-            return rect.bottom - rel * rect.height
-
+            return padded_bottom - rel * padded_height
         expected_times_list = []
         for track in expected_midi_msgs.values() if expected_midi_msgs else []:
             for msg in track:
@@ -408,7 +416,6 @@ class AnalyticsPopup:
         def performed_time_to_x(time):
             norm = time / max_performed_time if max_performed_time > 0 else 0
             return rect.left + norm * rect.width
-
         expected_onsets = {}
         for track_index, track in enumerate(expected_midi_msgs.values() if expected_midi_msgs else []):
             for msg in track:
@@ -420,8 +427,7 @@ class AnalyticsPopup:
                         x1 = expected_time_to_x(onset)
                         x2 = expected_time_to_x(getattr(msg, "time", 0))
                         y = pitch_to_y(msg.note)
-                        pygame.draw.rect(surface, (0, 0, 200), pygame.Rect(x1, y - 4, max(1, x2 - x1), 8))
-
+                        pygame.draw.rect(surface,  (80, 160, 255) if track_index == 0 else (200, 0, 0), pygame.Rect(x1, y - bar_height / 2, max(1, x2 - x1), bar_height), border_radius=8)
         performed_onsets = {}
         performed_color = pygame.Color(0, 200, 0, 128)
         for msg in performed_notes:
@@ -433,4 +439,4 @@ class AnalyticsPopup:
                     x1 = performed_time_to_x(onset)
                     x2 = performed_time_to_x(getattr(msg, "time", 0))
                     y = pitch_to_y(msg.note)
-                    pygame.draw.rect(surface, performed_color, pygame.Rect(x1, y - 4, max(1, x2 - x1), 8))
+                    pygame.draw.rect(surface, performed_color, pygame.Rect(x1, y - bar_height / 2, max(1, x2 - x1), bar_height), border_radius=8)
