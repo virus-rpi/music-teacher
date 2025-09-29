@@ -2,15 +2,11 @@ import io
 import json
 import re
 from collections import defaultdict
-from pprint import pprint
-
 import matplotlib
 import numpy as np
 import pygame
 from pygame_gui.core import ObjectID
-
 from save_system import SaveSystem
-
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import pygame_gui
@@ -223,12 +219,13 @@ class AnalyticsPopup:
         pianoroll_w = dims['left_w']
         pianoroll_h = self.img_pianoroll.rect.height
         if analytics:
-            spider_chart = self._matplotlib_spider_chart(analytics, width=radar_w, height=radar_h)
-            self.img_spider.set_image(spider_chart)
-            tips_html = self._generate_tips_html(analytics)
-            self.tips_box.set_text(tips_html)
-            pianoroll_rect = self.img_pianoroll.rect.copy()
-            self._render_pianoroll(self.img_pianoroll.image, pianoroll_rect)
+            self.img_spider.set_image(self._matplotlib_spider_chart(analytics, width=radar_w, height=radar_h))
+            self._generate_tips_html(analytics)
+            self.tips_box.set_text(self._generate_tips_html(analytics))
+
+            pianoroll_surface = pygame.Surface((pianoroll_w, pianoroll_h), pygame.SRCALPHA)
+            self._render_pianoroll(pianoroll_surface, pygame.Rect(0, 0, pianoroll_w, pianoroll_h))
+            self.img_pianoroll.set_image(pianoroll_surface)
         else:
             self.img_spider.set_image(pygame.Surface((radar_w, radar_h), pygame.SRCALPHA))
             self.tips_box.set_text('<b>No analytics available yet.</b>')
@@ -373,7 +370,9 @@ class AnalyticsPopup:
         return img
 
     def _render_pianoroll(self, surface, rect):
-        """Draws a pianoroll comparison of expected vs performed notes."""
+        surface.fill((0, 0, 0, 0))
+        pygame.draw.rect(surface, (30, 30, 30), rect)
+        pygame.draw.rect(surface, (80, 80, 80), rect, 1)
         measure_data = self.teacher.midi_teacher.get_notes_for_measure(
             self._selected_measure,
             unpacked = False,
@@ -382,9 +381,6 @@ class AnalyticsPopup:
         performed_notes = self.teacher.midi_teacher.get_performed_notes_for_measure(
             self._selected_measure, self._selected_section, self._selected_pass
         )
-        # Background
-        pygame.draw.rect(surface, (30, 30, 30), rect)
-        pygame.draw.rect(surface, (80, 80, 80), rect, 1)
         if not expected_midi_msgs and not performed_notes:
             return
         all_notes = [msg.note for track_index in range(len(expected_midi_msgs)) for msg in expected_midi_msgs[track_index] if msg.type in ("note_on", "note_off")]
@@ -424,9 +420,10 @@ class AnalyticsPopup:
                         x1 = expected_time_to_x(onset)
                         x2 = expected_time_to_x(getattr(msg, "time", 0))
                         y = pitch_to_y(msg.note)
-                        pygame.draw.rect(surface, (0, 0, 200) if track_index == 0 else (200, 0, 0), pygame.Rect(x1, y - 4, max(1, x2 - x1), 8))
+                        pygame.draw.rect(surface, (0, 0, 200), pygame.Rect(x1, y - 4, max(1, x2 - x1), 8))
 
         performed_onsets = {}
+        performed_color = pygame.Color(0, 200, 0, 128)
         for msg in performed_notes:
             if msg.type == "note_on" and msg.velocity > 0:
                 performed_onsets[msg.note] = getattr(msg, "time", 0)
@@ -436,4 +433,4 @@ class AnalyticsPopup:
                     x1 = performed_time_to_x(onset)
                     x2 = performed_time_to_x(getattr(msg, "time", 0))
                     y = pitch_to_y(msg.note)
-                    pygame.draw.rect(surface, (0, 200, 0), pygame.Rect(x1, y - 4, max(1, x2 - x1), 8))
+                    pygame.draw.rect(surface, performed_color, pygame.Rect(x1, y - 4, max(1, x2 - x1), 8))
