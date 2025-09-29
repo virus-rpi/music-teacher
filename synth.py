@@ -42,7 +42,7 @@ class Synth:
         self.fs.program_select(0, self.sfid, 0, 0)  # Restore to piano
 
     def play_measure(self, measure_index, midi_teacher, set_index_callback=None, reset_to_index=None):
-        chords, times, _, _, (start_index, _) = midi_teacher.get_notes_for_measure(measure_index)
+        chords, times, _, _, (start_index, _), _ = midi_teacher.get_notes_for_measure(measure_index)
         
         self.play_notes(chords, times, start_index=start_index if set_index_callback else None, set_index_callback=set_index_callback, reset_to_index=reset_to_index)
 
