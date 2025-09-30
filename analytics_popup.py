@@ -160,10 +160,13 @@ class AnalyticsPopup:
 
         self._analytics = None
 
+        self._ui_manager.preload_fonts([{'name': 'noto_sans', 'point_size': 14, 'style': 'italic', 'antialiased': '1'}, {'name': 'noto_sans', 'point_size': 14, 'style': 'bold', 'antialiased': '1'}])
+
     def toggle(self):
         self.visible = not self.visible
         if self.visible:
             self._build_path_map()
+            self._analytics = self._get_selected_analytics()
 
     def draw(self, surface: pygame.Surface):
         if not self.visible:
@@ -177,9 +180,7 @@ class AnalyticsPopup:
 
             if not self._main_container:
                 self._main_container = FlexBox(manager=self._ui_manager,
-                                               relative_rect=pygame.Rect(self._margin, self._margin,
-                                                                         dims[0] - self._margin * 2,
-                                                                         dims[1] - self._margin * 2), gap=12)
+                                               relative_rect=pygame.Rect(0, 0, dims[0], dims[1]), gap=12, padding=self._margin)
 
                 left_side = FlexBox(manager=self._ui_manager, relative_rect=pygame.Rect(0, 0, 0, 0), gap=12,
                                     align_y="start", direction="vertical")
@@ -187,15 +188,17 @@ class AnalyticsPopup:
                 self._render_title(left_side)
                 _render_overall_score(self._analytics, self._big_font, left_side)
 
-                radar_chart = pygame_gui.elements.UIImage(
-                    image_surface=pygame.Surface((100, 100), pygame.SRCALPHA),
-                    relative_rect=pygame.Rect(0, 0, 100, 100),
-                )
-                left_side.place_element(radar_chart, width_percent=1, height_percent=0.5)
                 if self._analytics:
-                    radar_chart.set_image(_matplotlib_spider_chart(self._analytics, radar_chart.relative_rect[2], radar_chart.relative_rect[3]))
+                    radar_chart = pygame_gui.elements.UIImage(
+                        image_surface=pygame.Surface((100, 100), pygame.SRCALPHA),
+                        relative_rect=pygame.Rect(0, 0, 100, 100),
+                    )
+                    left_side.place_element(radar_chart, width_percent=1, height_percent="max")
+                    self._render_pianoroll(left_side)
+                    radar_chart.set_image(_matplotlib_spider_chart(self._analytics, radar_chart.relative_rect[2],
+                                                                   radar_chart.relative_rect[3]))
 
-                self._main_container.place_element(_generate_tips(self._analytics), width_percent=0.4, height_percent=1)
+                self._main_container.place_element(_generate_tips(self._analytics), width_percent="max", height_percent=1)
 
             now = pygame.time.get_ticks()
             dt = max(0, now - self._last_update_ms) / 1000.0
@@ -324,3 +327,79 @@ class AnalyticsPopup:
                 s.load_file(self.pass_map[self._selected_measure][self._selected_section][self._selected_pass]))
             analytics = raw.get('analytics', {})
             return analytics
+
+    def _render_pianoroll(self, flexbox: FlexBox):
+        surface_element = pygame_gui.elements.UIImage(
+            image_surface=pygame.Surface((100, 100), pygame.SRCALPHA),
+            relative_rect=pygame.Rect(0, 0, 100, 100),
+        )
+        flexbox.place_element(surface_element, width_percent=1, height_percent="max")
+        rect = pygame.Rect(0, 0, surface_element.relative_rect[2], surface_element.relative_rect[3])
+        surface = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+
+        pygame.draw.rect(surface, (20, 20, 20), rect, border_radius=8)
+        measure_data = self.teacher.midi_teacher.get_notes_for_measure(
+            self._selected_measure,
+            unpacked = False,
+        )
+        expected_chords, expected_times, expected_midi_msgs = measure_data.chords, measure_data.times, measure_data.midi_msgs
+        performed_notes = self.teacher.midi_teacher.get_performed_notes_for_measure(
+            self._selected_measure, self._selected_section, self._selected_pass
+        )
+        if not expected_midi_msgs and not performed_notes:
+            return
+        all_notes = [msg.note for track_index in range(len(expected_midi_msgs)) for msg in expected_midi_msgs[track_index] if msg.type in ("note_on", "note_off")]
+        if performed_notes:
+            all_notes += [msg.note for msg in performed_notes if msg.type in ("note_on", "note_off")]
+        if not all_notes:
+            return
+        min_pitch, max_pitch = min(all_notes), max(all_notes)
+        pitch_range = max_pitch - min_pitch + 1
+        vertical_padding = 32
+        padded_top = rect.top + vertical_padding
+        padded_bottom = rect.bottom - vertical_padding
+        padded_height = padded_bottom - padded_top
+        bar_height = padded_height / pitch_range
+        def pitch_to_y(note):
+            rel = (note - min_pitch) / max(1, pitch_range)
+            return padded_bottom - rel * padded_height
+        expected_times_list = []
+        for track in expected_midi_msgs.values() if expected_midi_msgs else []:
+            for msg in track:
+                if hasattr(msg, "time"):
+                    expected_times_list.append(getattr(msg, "time", 0))
+        performed_times_list = [getattr(msg, "time", 0) for msg in performed_notes if hasattr(msg, "time")]
+        max_expected_time = max(expected_times_list) if expected_times_list else 1
+        max_performed_time = max(performed_times_list) if performed_times_list else 1
+        def expected_time_to_x(time):
+            norm = time / max_expected_time if max_expected_time > 0 else 0
+            return rect.left + norm * rect.width
+        def performed_time_to_x(time):
+            norm = time / max_performed_time if max_performed_time > 0 else 0
+            return rect.left + norm * rect.width
+        expected_onsets = {}
+        for track_index, track in enumerate(expected_midi_msgs.values() if expected_midi_msgs else []):
+            for msg in track:
+                if msg.type == "note_on" and msg.velocity > 0:
+                    expected_onsets[msg.note] = getattr(msg, "time", 0)
+                elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
+                    onset = expected_onsets.pop(msg.note, None)
+                    if onset is not None:
+                        x1 = expected_time_to_x(onset)
+                        x2 = expected_time_to_x(getattr(msg, "time", 0))
+                        y = pitch_to_y(msg.note)
+                        pygame.draw.rect(surface,  (80, 160, 255) if track_index == 0 else (200, 0, 0), pygame.Rect(x1, y - bar_height / 2, max(1, x2 - x1), bar_height), border_radius=8)
+        performed_onsets = {}
+        performed_color = pygame.Color(0, 200, 0, 128)
+        for msg in performed_notes:
+            if msg.type == "note_on" and msg.velocity > 0:
+                performed_onsets[msg.note] = getattr(msg, "time", 0)
+            elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
+                onset = performed_onsets.pop(msg.note, None)
+                if onset is not None:
+                    x1 = performed_time_to_x(onset)
+                    x2 = performed_time_to_x(getattr(msg, "time", 0))
+                    y = pitch_to_y(msg.note)
+                    pygame.draw.rect(surface, performed_color, pygame.Rect(x1, y - bar_height / 2, max(1, x2 - x1), bar_height), border_radius=8)
+
+        surface_element.set_image(surface)
