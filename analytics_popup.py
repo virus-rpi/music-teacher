@@ -220,15 +220,12 @@ def _filter_midi_messages_by_section(midi_msgs, chord_times, start_chord_idx, en
             end_time = float('inf')
     else:
         end_time = float('inf')
-
     filtered_msgs = {}
     for track_idx, messages in midi_msgs.items():
         filtered_track = []
         notes_started_in_section = set()
-
         for msg in messages:
             msg_time = getattr(msg, 'time', 0)
-
             if msg.type == "note_on" and msg.velocity > 0:
                 if start_time <= msg_time < end_time:
                     filtered_track.append(msg)
@@ -240,10 +237,8 @@ def _filter_midi_messages_by_section(midi_msgs, chord_times, start_chord_idx, en
             else:
                 if start_time <= msg_time < end_time:
                     filtered_track.append(msg)
-
         if filtered_track:
             filtered_msgs[track_idx] = filtered_track
-
     return filtered_msgs
 
 
@@ -281,7 +276,7 @@ class AnalyticsPopup:
         self.visible = not self.visible
         if self.visible:
             self._build_path_map()
-            self._analytics = self._get_selected_analytics()
+            self._update()
 
     def draw(self, surface: pygame.Surface):
         if not self.visible:
@@ -322,13 +317,18 @@ class AnalyticsPopup:
             self._ui_manager.draw_ui(e)
 
     def _update(self):
-        self._measure_selector.kill()
-        self._section_selector.kill()
-        self._pass_selector.kill()
-        self._dropdown_container.kill()
-        self._dropdown_container = None
-        self._main_container.kill()
-        self._main_container = None
+        if self._measure_selector:
+            self._measure_selector.kill()
+        if self._section_selector:
+            self._section_selector.kill()
+        if self._pass_selector:
+            self._pass_selector.kill()
+        if self._dropdown_container:
+            self._dropdown_container.kill()
+            self._dropdown_container = None
+        if self._main_container:
+            self._main_container.kill()
+            self._main_container = None
         self._analytics = self._get_selected_analytics()
 
     def handle_event(self, event):
