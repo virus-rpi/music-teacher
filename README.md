@@ -27,10 +27,8 @@ Help is appreciated!
 ## Planned Features (may not all be implemented)
 - **Co-Pianist Mode**: Let it play the other hand or two other hands for you to practice or play songs that require more than two hands.
 - **Settings UI**: Customize the constants from a settings UI.
-- **Progress Persistence**: Save and load progress made in the guided mode.
 - **Hand placement hints**: Add an algorithm to calculate the optimal hand placement for comfort and ease of switching between cords.
 - **Improved Sheet Music Rendering**: Remove duplicate clefs and make sure the height stays consistent.
-- **Visual Feedback For Mistakes**: Show wrong notes and wrong timings in relation to how it should be, so it's easier to understand what to change.
 - **More Tips**: Add more tips for improving your score, including techniques for how to play certain things better (e.g. how to play fast consecutive notes)
 - **Rythmgame Mode**: Let the notes scroll down as bars and let the user play them as they appear.
 

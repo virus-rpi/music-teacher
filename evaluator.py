@@ -3,6 +3,9 @@ import mido
 from typing import Optional
 from midi_teach import MidiTeacher
 
+# TODO: do analytics based on raw midi instead of chords to make sure the timing stuff is
+# TODO: let user playback correct vs recorded midi to hear the difference
+
 WEIGHTS = {
     'accuracy': 0.6,
     'relative': 0.25,
