@@ -553,11 +553,11 @@ class AnalyticsPopup:
         performed_time_range = max_performed_time - min_performed_time if max_performed_time > min_performed_time else 1
         def expected_time_to_x(time):
             norm = (time - min_expected_time) / expected_time_range if expected_time_range > 0 else 0
-            return rect.left + norm * rect.width
+            return (rect.left + 12) + norm * (rect.width - 32)
 
         def performed_time_to_x(time):
             norm = (time - min_performed_time) / performed_time_range if performed_time_range > 0 else 0
-            return rect.left + norm * rect.width
+            return (rect.left + 12) + norm * (rect.width - 32)
 
         expected_onsets = {}
         left_hand_color = (80, 150, 255)
@@ -574,13 +574,11 @@ class AnalyticsPopup:
                         y = pitch_to_y(msg.note)
                         note_rect = pygame.Rect(x1, y - bar_height / 2, max(1, x2 - x1), bar_height)
                         color = right_hand_color if track_index == 0 else left_hand_color
-                        pygame.draw.rect(surface, color, note_rect, border_radius=8)
-                        border_color = tuple(max(0, c - 60) for c in color)
-                        pygame.draw.rect(surface, border_color, note_rect, 2, border_radius=8)
+                        pygame.draw.rect(surface, (*color, 180), note_rect, border_radius=8)
+                        pygame.draw.rect(surface, color, note_rect.inflate(-4, -4), 4, border_radius=6)
 
-        performed_surface = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
         performed_onsets = {}
-        performed_color = (255, 200, 0, 180)
+        performed_color = (0, 140, 40)
         for msg in performed_notes_absolute:
             if msg.type == "note_on" and msg.velocity > 0:
                 performed_onsets[msg.note] = msg.time
@@ -590,10 +588,9 @@ class AnalyticsPopup:
                     x1 = performed_time_to_x(onset)
                     x2 = performed_time_to_x(msg.time)
                     y = pitch_to_y(msg.note)
-                    note_rect = pygame.Rect(x1, y - bar_height / 2, max(2, x2 - x1), bar_height)
-                    pygame.draw.rect(performed_surface, performed_color, note_rect, border_radius=8)
-                    pygame.draw.rect(performed_surface, (80, 60, 0, 220), note_rect, 2, border_radius=8)
-        surface.blit(performed_surface, (0, 0), special_flags=pygame.BLEND_ALPHA_SDL2)
+                    note_rect = pygame.Rect(x1, y - (bar_height*.7) / 2, max(2, x2 - x1), (bar_height*.7))
+                    pygame.draw.rect(surface, (*performed_color, 180), note_rect, border_radius=8)
+                    pygame.draw.rect(surface, performed_color, note_rect.inflate(-2, -2), 2, border_radius=8)
         surface_element.set_image(surface)
 
     def _get_section_bounds(self):
