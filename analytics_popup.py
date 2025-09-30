@@ -1,5 +1,6 @@
 import io
 import json
+import math
 import re
 from collections import defaultdict
 import matplotlib
@@ -555,7 +556,8 @@ class AnalyticsPopup:
         gap_color = (128, 128, 128)
         for gap_index in gaps:
             y = padded_bottom - gap_index * (padded_height / len(slots_with_merged_gaps))
-            pygame.draw.line(surface, gap_color, (rect.left, y), (rect.right, y), 2)
+            points = [(x, y + math.sin(0.4*x)) for x in range(rect.left + 64, rect.right - 64)]
+            pygame.draw.aalines(surface, gap_color, False, points)
 
         expected_times_list = []
         for track in expected_midi_msgs.values() if expected_midi_msgs else []:
