@@ -7,7 +7,6 @@ import numpy as np
 import pygame
 from flexbox import FlexBox
 from save_system import SaveSystem
-from pprint import pprint
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -138,7 +137,13 @@ def _filter_midi_messages_by_section(midi_msgs, chord_times, start_chord_idx, en
     if not midi_msgs or not chord_times or start_chord_idx >= len(chord_times):
         return {}
     start_time = chord_times[start_chord_idx] if start_chord_idx < len(chord_times) else 0
-    end_time = chord_times[end_chord_idx] if end_chord_idx < len(chord_times) else float('inf')
+    if end_chord_idx < len(chord_times):
+        if end_chord_idx + 1 < len(chord_times):
+            end_time = chord_times[end_chord_idx + 1]
+        else:
+            end_time = float('inf')
+    else:
+        end_time = float('inf')
 
     filtered_msgs = {}
     for track_idx, messages in midi_msgs.items():
@@ -451,11 +456,9 @@ class AnalyticsPopup:
                         y = pitch_to_y(msg.note)
                         pygame.draw.rect(surface,  (80, 160, 255) if track_index == 0 else (200, 0, 0), pygame.Rect(x1, y - bar_height / 2, max(1, x2 - x1), bar_height), border_radius=8)
 
-        pprint(performed_notes)
         performed_surface = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
         performed_onsets = {}
         performed_color = (0, 200, 0, 128)
-        # Use the converted absolute time messages instead of original delta time messages
         for msg in performed_notes_absolute:
             if msg.type == "note_on" and msg.velocity > 0:
                 performed_onsets[msg.note] = msg.time
