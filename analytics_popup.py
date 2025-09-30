@@ -20,31 +20,104 @@ def _render_background(surface):
 
 def _generate_tips(analytics) -> pygame_gui.elements.UITextBox:
     tips = []
+    technique_tips = []
+
     if not analytics:
         return pygame_gui.elements.UITextBox(
             html_text='<i>No analytics available.</i>',
             relative_rect=pygame.Rect(0, 0, 100, 10),
         )
+
+    # Existing diagnostic tips
     if analytics.get('worst_chord_idx') is not None:
         idx = analytics['worst_chord_idx'] + 1
         score = analytics['worst_chord_score']
         tips.append(f'Chord {idx} had the lowest accuracy: {score:.2f}')
+
+        # Add technique tip for chord accuracy
+        if score < 0.7:
+            technique_tips.append(f'For chord {idx}: Practice slowly with strong finger independence. Press all notes simultaneously and hold until the sound blends completely.')
+        elif score < 0.9:
+            technique_tips.append(f'For chord {idx}: Focus on even finger pressure and wrist stability. Practice the chord in isolation 10 times before playing in context.')
+
     if analytics.get('worst_interval_idx') is not None:
         idx = analytics['worst_interval_idx'] + 1
         diff = analytics['worst_interval_diff']
         tips.append(f'Largest timing gap error between onsets {idx} and {idx + 1}: {diff:.2f}')
+
+        # Add technique tip for timing
+        if abs(diff) > 0.1:
+            technique_tips.append(f'Timing technique: Use a metronome and practice counting subdivisions. Try playing with exaggerated staccato first, then gradually connect the notes.')
+        else:
+            technique_tips.append(f'Fine timing: Practice with different rhythmic patterns (dotted, syncopated) to improve internal pulse accuracy.')
+
     if analytics.get('tempo_bias') is not None:
         bias = analytics['tempo_bias']
         if abs(bias) > 0.02:
             tips.append(f'Overall tempo was {"faster" if bias > 0 else "slower"} by {abs(bias) * 100:.1f}%')
+
+            # Add technique tips for tempo control
+            if bias > 0.05:  # rushing
+                technique_tips.append('Tempo control: Practice with a metronome at 70% target tempo. Focus on feeling the "space" between beats. Try conducting with your free hand.')
+            elif bias < -0.05:  # dragging
+                technique_tips.append('Tempo energy: Imagine the music moving forward. Practice with slight accent on beat 1 of each measure. Keep your body engaged and avoid tension.')
+            else:  # minor tempo issues
+                technique_tips.append('Tempo stability: Record yourself and play back to develop tempo awareness. Practice starting pieces at different tempos without a metronome.')
+
     if analytics.get('legato_detected'):
         sev = analytics.get('legato_severity', 0)
         tips.append(f'Legato severity {sev * 100:.1f}% (lower is better)')
-    if not tips:
+
+        # Add technique tips for legato
+        if sev > 0.3:
+            technique_tips.append('Legato technique: Practice finger substitution exercises. Connect notes by transferring weight smoothly between fingers while keeping wrist flexible.')
+        elif sev > 0.1:
+            technique_tips.append('Refined legato: Focus on "singing" through your fingers. Practice scales with different finger combinations to improve connection smoothness.')
+
+    # General technique tips based on overall performance
+    accuracy = analytics.get('accuracy', 0)
+    relative_timing = analytics.get('relative', 0)
+    absolute_timing = analytics.get('absolute', 0)
+
+    if accuracy < 0.8:
+        technique_tips.append('Accuracy foundation: Practice hands separately first. Use slow practice (50% tempo) with perfect accuracy before increasing speed.')
+    elif accuracy < 0.95:
+        technique_tips.append('Precision technique: Practice with mental preparation - visualize each note before playing. Use firm, deliberate finger actions.')
+
+    if relative_timing < 0.8:
+        technique_tips.append('Rhythmic precision: Clap the rhythm while singing note names. Practice with different articulations (staccato, legato, accented) to internalize the pattern.')
+    elif relative_timing < 0.95:
+        technique_tips.append('Advanced rhythm: Practice with displaced accents and cross-rhythms to develop rock-solid internal timing.')
+
+    if absolute_timing < 0.8:
+        technique_tips.append('Steady pulse: Practice with a drone or sustained chord. Count aloud while playing. Use body movement (tapping foot, swaying) to internalize the beat.')
+    elif absolute_timing < 0.95:
+        technique_tips.append('Pulse refinement: Practice with polyrhythms (2 against 3, etc.). Record yourself with a metronome and analyze timing deviations.')
+
+    # Score-based encouragement and advanced tips
+    overall_score = analytics.get('score', {}).get('overall', 0) if analytics.get('score') else 0
+
+    if overall_score > 0.95:
+        technique_tips.append('Mastery level: Focus on musical expression. Experiment with subtle tempo variations (rubato) and dynamic shading while maintaining technical precision.')
+    elif overall_score > 0.85:
+        technique_tips.append('Advanced practice: Try practicing in different keys or with altered rhythms. Focus on musical phrasing and breath-like flow between sections.')
+    elif overall_score > 0.7:
+        technique_tips.append('Building consistency: Practice the piece at 80% tempo until you can play it perfectly 3 times in a row before increasing speed.')
+
+    # Mental and physical technique tips
+    if len(tips) > 2:  # If there are multiple issues
+        technique_tips.append('Practice strategy: Break the piece into small sections (2-4 measures). Master each section before combining. Always practice problem spots in isolation.')
+        technique_tips.append('Physical technique: Check your posture and hand position. Tension often causes timing and accuracy issues. Practice relaxation exercises between repetitions.')
+
+    if not tips and not technique_tips:
         tips = ['No major issues detected.']
-    list_items = ''.join([f'- {t} <br/>' for t in tips])
+        technique_tips = ['Excellent performance! Focus on musical expression and exploring different interpretations of the piece.']
+
+    # Combine diagnostic and technique tips
+    all_tips = tips + technique_tips
+    list_items = ''.join([f'- {t} <br/>' for t in all_tips])
     return pygame_gui.elements.UITextBox(
-        html_text=f'<b>Tips:</b><br/>{list_items}',
+        html_text=f'<b>Performance Analysis & Technique Tips:</b><br/>{list_items}',
         relative_rect=pygame.Rect(0, 0, 100, 10000),
     )
 
