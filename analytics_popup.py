@@ -413,10 +413,20 @@ class AnalyticsPopup:
             for msg in track:
                 if hasattr(msg, "time"):
                     expected_times_list.append(getattr(msg, "time", 0))
-        performed_times_list = [getattr(msg, "time", 0) for msg in performed_notes if hasattr(msg, "time")]
+        performed_notes_absolute = []
+        current_time = 0
+        for msg in performed_notes:
+            current_time += getattr(msg, 'time', 0)
+            abs_msg = msg.copy()
+            abs_msg.time = current_time
+            performed_notes_absolute.append(abs_msg)
+
+        performed_times_list = [msg.time for msg in performed_notes_absolute if hasattr(msg, "time")]
+
         min_expected_time = min(expected_times_list) if expected_times_list else 0
         max_expected_time = max(expected_times_list) if expected_times_list else 1
         expected_time_range = max_expected_time - min_expected_time if max_expected_time > min_expected_time else 1
+
         min_performed_time = min(performed_times_list) if performed_times_list else 0
         max_performed_time = max(performed_times_list) if performed_times_list else 1
         performed_time_range = max_performed_time - min_performed_time if max_performed_time > min_performed_time else 1
@@ -445,14 +455,15 @@ class AnalyticsPopup:
         performed_surface = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
         performed_onsets = {}
         performed_color = (0, 200, 0, 128)
-        for msg in performed_notes:
+        # Use the converted absolute time messages instead of original delta time messages
+        for msg in performed_notes_absolute:
             if msg.type == "note_on" and msg.velocity > 0:
-                performed_onsets[msg.note] = getattr(msg, "time", 0)
+                performed_onsets[msg.note] = msg.time
             elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
                 onset = performed_onsets.pop(msg.note, None)
                 if onset is not None:
                     x1 = performed_time_to_x(onset)
-                    x2 = performed_time_to_x(getattr(msg, "time", 0))
+                    x2 = performed_time_to_x(msg.time)
                     y = pitch_to_y(msg.note)
                     pygame.draw.rect(performed_surface, performed_color,
                                    pygame.Rect(x1, y - bar_height / 2, max(20, x2 - x1), bar_height), border_radius=8)
