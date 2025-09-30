@@ -12,6 +12,8 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import pygame_gui
 
+# TODO: let user playback correct vs recorded midi to hear the difference
+# TODO: add toggle for relative or absolute timing in the piano roll (separate or merged x normalization)
 
 def _render_background(surface):
     pygame.draw.rect(surface, (30, 30, 30), (0, 0, surface.get_width(), surface.get_height()), border_radius=16)

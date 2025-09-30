@@ -78,6 +78,7 @@ uv sync
 - **A**: Toggle auto-advance when reaching a 95% score
 - **Enter**: Move to the next section
   - **Shift+Enter**: Move to the previous section
+- **Tab**: Toggle advanced analytics popup
  
 ## Screenshots
 
@@ -98,4 +99,7 @@ Teaching mode toogled off:
 - `sheet_music.py`, `sheet_music_renderer.py`: Sheet music rendering
 - `guided_teacher.py`: Guided mode overlays and logic
 - `visual.py`: Piano and UI drawing
+- `analytics_popup.py`: Popup for advanced analytics
+- `flexbox.py`: Flexbox layout helper for the analytics popup
+- `save_system.py`: Save system for the state and midi file
 
