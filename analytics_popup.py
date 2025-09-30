@@ -367,6 +367,52 @@ class AnalyticsPopup:
             analytics = raw.get('analytics', {})
             return analytics
 
+    def _get_expected_notes_for_section(self):
+        """Get expected notes for the current section, handling transition sections specially."""
+        if self._selected_section == "transition":
+            from_measure = self._selected_measure
+            to_measure = self._selected_measure + 1
+            from_chords, from_times, from_xs, _, (from_start_idx, _), from_midi_msgs = self.teacher.midi_teacher.get_notes_for_measure(from_measure)
+            to_chords, to_times, to_xs, _, (to_start_idx, _), to_midi_msgs = self.teacher.midi_teacher.get_notes_for_measure(to_measure)
+
+            if not from_chords or not to_chords:
+                return {}
+
+            start_chord_idx, end_chord_idx = self._get_section_bounds()
+            from_midi_msgs = _filter_midi_messages_by_section(from_midi_msgs, from_times, start_chord_idx, len(from_times) - 1)
+            to_midi_msgs = _filter_midi_messages_by_section(to_midi_msgs, to_times, 0, end_chord_idx - len(from_times))
+            max_from_time = 0
+            for track in from_midi_msgs.values():
+                for msg in track:
+                    max_from_time = max(max_from_time, getattr(msg, 'time', 0))
+            time_offset = max_from_time + 100
+            filtered_midi_msgs = defaultdict(list)
+            for track_idx, messages in from_midi_msgs.items():
+                filtered_midi_msgs[track_idx].extend(messages)
+            for track_idx, messages in to_midi_msgs.items():
+                for msg in messages:
+                    adjusted_msg = msg.copy()
+                    adjusted_msg.time = getattr(msg, 'time', 0) + time_offset
+                    filtered_midi_msgs[track_idx].append(adjusted_msg)
+
+            return filtered_midi_msgs
+        else:
+            measure_data = self.teacher.midi_teacher.get_notes_for_measure(
+                self._selected_measure,
+                unpacked=False,
+            )
+            expected_chords, expected_times, expected_midi_msgs = measure_data.chords, measure_data.times, measure_data.midi_msgs
+
+            try:
+                start_chord_idx, end_chord_idx = self._get_section_bounds()
+                expected_midi_msgs = _filter_midi_messages_by_section(
+                    expected_midi_msgs, expected_times, start_chord_idx, end_chord_idx
+                )
+            except (FileNotFoundError, json.JSONDecodeError, KeyError):
+                pass
+
+            return expected_midi_msgs
+
     def _render_pianoroll(self, flexbox: FlexBox):
         surface_element = pygame_gui.elements.UIImage(
             image_surface=pygame.Surface((100, 100), pygame.SRCALPHA),
@@ -377,20 +423,9 @@ class AnalyticsPopup:
         surface = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
 
         pygame.draw.rect(surface, (20, 20, 20), rect, border_radius=8)
-        measure_data = self.teacher.midi_teacher.get_notes_for_measure(
-            self._selected_measure,
-            unpacked = False,
-        )
-        expected_chords, expected_times, expected_midi_msgs = measure_data.chords, measure_data.times, measure_data.midi_msgs
-  
-        try:
-            start_chord_idx, end_chord_idx = self._get_section_bounds()
-            expected_midi_msgs = _filter_midi_messages_by_section(
-                expected_midi_msgs, expected_times, start_chord_idx, end_chord_idx
-            )
-        except (FileNotFoundError, json.JSONDecodeError, KeyError):
-            pass
-        
+
+        expected_midi_msgs = self._get_expected_notes_for_section()
+
         performed_notes = self.teacher.midi_teacher.get_performed_notes_for_measure(
             self._selected_measure, self._selected_section, self._selected_pass
         )
