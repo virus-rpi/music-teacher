@@ -143,7 +143,6 @@ class AnalyticsPopup:
                 self._ui_manager.set_window_resolution(e.get_size())
                 self._ui_manager.set_offset(offset)
             _render_background(e)
-            self._render_title(e)
 
             if not self._main_container:
                 self._main_container = FlexBox(manager=self._ui_manager,
@@ -151,8 +150,9 @@ class AnalyticsPopup:
                                                                          dims[0] - self._margin * 2,
                                                                          dims[1] - self._margin * 2), gap=12)
 
-                left_side = FlexBox(manager=self._ui_manager, relative_rect=pygame.Rect(0, 0, 0, 0), gap=12)
+                left_side = FlexBox(manager=self._ui_manager, relative_rect=pygame.Rect(0, 0, 0, 0), gap=12, align_y="start", direction="vertical")
                 self._main_container.place_element(left_side, width_percent=0.6, height_percent=1)
+                self._render_title(left_side)
                 _render_overall_score(self._analytics, self._big_font, left_side)
                 self._main_container.place_element(_generate_tips(self._analytics), width_percent=0.4, height_percent=1)
 
@@ -206,9 +206,14 @@ class AnalyticsPopup:
                     self._selected_pass = int(p.group(1))
                     self._update()
 
-    def _render_title(self, surface):
+    def _render_title(self, parent):
         title_surf = self._font.render('Performance Analytics for', True, (255, 255, 255))
-        surface.blit(title_surf, (self._margin, self._margin))
+        container = FlexBox(manager=self._ui_manager, relative_rect=pygame.Rect(self._margin, self._margin, 0, title_surf.get_height()), gap=12)
+        parent.place_element(container, height_px=title_surf.get_height(), width_percent=1)
+        container.place_element(pygame_gui.elements.UIImage(
+            image_surface=title_surf,
+            relative_rect=pygame.Rect(0, 0, title_surf.get_width(), title_surf.get_height()),
+        ), height_px=title_surf.get_height(), width_px=title_surf.get_width())
         self._render_dropdowns(self._margin + title_surf.get_width() + 12)
 
     def _render_dropdowns(self, x):

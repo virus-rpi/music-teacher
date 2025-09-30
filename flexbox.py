@@ -1,5 +1,4 @@
-from typing import List, Optional, Tuple
-
+from typing import Optional
 import pygame
 from pygame_gui import UIManager
 from pygame_gui.core import UIContainer, UIElement
@@ -7,7 +6,7 @@ from pygame_gui.core.gui_type_hints import RectLike
 
 
 class FlexBox(UIContainer):
-    def __init__(self, manager: UIManager, relative_rect: RectLike, margin: int = 0, gap: int = 0, direction: str = 'horizontal'):
+    def __init__(self, manager: UIManager, relative_rect: RectLike, margin: int = 0, gap: int = 0, direction: str = 'horizontal', align_x: str = 'start', align_y: str = 'center'):
         sw, sh = manager.window_resolution
         super().__init__(pygame.Rect(relative_rect.x, relative_rect.y, sw-relative_rect.x, sh-relative_rect.y), manager)
         self.width_prop = relative_rect.width if relative_rect.width > 0 else None
@@ -15,7 +14,9 @@ class FlexBox(UIContainer):
         self.margin = margin
         self.gap = gap
         self.direction = direction  # 'horizontal' or 'vertical'
-        self.element_data: List[Tuple[UIElement, Optional[float], Optional[float], Optional[int], Optional[int]]] = []
+        self.align_x = align_x  # 'start', 'center', 'end'
+        self.align_y = align_y  # 'start', 'center', 'end'
+        self.element_data: list[tuple[UIElement, Optional[float], Optional[float], Optional[int], Optional[int]]] = []
 
     def place_element(self, element: UIElement, width_percent: Optional[float] = None, height_percent: Optional[float] = None, width_px: Optional[int] = None, height_px: Optional[int] = None):
         """
@@ -52,7 +53,7 @@ class FlexBox(UIContainer):
     def rebuild_sizes(self):
         n = len(self.element_data)
         if n == 0:
-            return self
+            return
         width, height = self.width_prop, self.height_prop
         if self.direction == 'horizontal':
             if width is None and not isinstance(self.ui_container, FlexBox):
@@ -77,13 +78,28 @@ class FlexBox(UIContainer):
                 max_width = max(wpx if wpx is not None else 1 for _, _, _, wpx, _ in self.element_data)
                 width = max_width + 2 * self.margin
             elif width is None:
-                height = self.relative_rect[2]
+                width = self.relative_rect[2]
+
         if self.direction == 'horizontal':
             total_specified = sum(w for _, w, _, _, _ in self.element_data if w is not None)
             unspecified = [i for i, (_, w, _, _, _) in enumerate(self.element_data) if w is None]
             remaining = 1.0 - total_specified if width is not None else 0
             even_width = remaining / len(unspecified) if unspecified and width is not None else 0
-            x = self.margin
+
+            total_content_width = sum(
+                int(w * (width - 2 * self.margin - self.gap * (n - 1))) if w is not None else wpx
+                for _, w, _, wpx, _ in self.element_data
+            ) if width is not None else sum(wpx for _, _, _, wpx, _ in self.element_data if wpx is not None)
+            total_content_width += self.gap * (n - 1)
+
+            if self.align_x == 'start':
+                start_x = self.margin
+            elif self.align_x == 'center':
+                start_x = self.margin + ((width - 2 * self.margin - total_content_width) // 2) if width is not None else self.margin
+            else:  # 'end'
+                start_x = width - self.margin - total_content_width if width is not None else self.margin
+
+            x = start_x
             for i, (elem, w, h, wpx, hpx) in enumerate(self.element_data):
                 if width is not None:
                     wp = w if w is not None else even_width
@@ -95,7 +111,14 @@ class FlexBox(UIContainer):
                     eh = int(hp * (height - 2 * self.margin)) if h is not None else hpx
                 else:
                     eh = hpx
-                y = self.margin + ((height - 2 * self.margin - eh) // 2 if height is not None else 0)
+
+                if self.align_y == 'start':
+                    y = self.margin
+                elif self.align_y == 'center':
+                    y = self.margin + ((height - 2 * self.margin - eh) // 2 if height is not None else 0)
+                else:  # 'end'
+                    y = height - self.margin - eh if height is not None else self.margin
+
                 elem.set_relative_position((x, y))
                 elem.set_dimensions((ew, eh))
                 x += ew + self.gap
@@ -104,7 +127,21 @@ class FlexBox(UIContainer):
             unspecified = [i for i, (_, _, h, _, _) in enumerate(self.element_data) if h is None]
             remaining = 1.0 - total_specified if height is not None else 0
             even_height = remaining / len(unspecified) if unspecified and height is not None else 0
-            y = self.margin
+
+            total_content_height = sum(
+                int(h * (height - 2 * self.margin - self.gap * (n - 1))) if h is not None else hpx
+                for _, _, h, _, hpx in self.element_data
+            ) if height is not None else sum(hpx for _, _, _, _, hpx in self.element_data if hpx is not None)
+            total_content_height += self.gap * (n - 1)
+
+            if self.align_y == 'start':
+                start_y = self.margin
+            elif self.align_y == 'center':
+                start_y = self.margin + ((height - 2 * self.margin - total_content_height) // 2) if height is not None else self.margin
+            else:  # 'end'
+                start_y = height - self.margin - total_content_height if height is not None else self.margin
+
+            y = start_y
             for i, (elem, w, h, wpx, hpx) in enumerate(self.element_data):
                 if height is not None:
                     hp = h if h is not None else even_height
@@ -116,8 +153,14 @@ class FlexBox(UIContainer):
                     ew = int(wp * (width - 2 * self.margin)) if w is not None else wpx
                 else:
                     ew = wpx
-                x = self.margin + ((width - 2 * self.margin - ew) // 2 if width is not None else 0)
+
+                if self.align_x == 'start':
+                    x = self.margin
+                elif self.align_x == 'center':
+                    x = self.margin + ((width - 2 * self.margin - ew) // 2 if width is not None else 0)
+                else:  # 'end'
+                    x = width - self.margin - ew if width is not None else self.margin
+
                 elem.set_relative_position((x, y))
                 elem.set_dimensions((ew, eh))
                 y += eh + self.gap
-        return self
