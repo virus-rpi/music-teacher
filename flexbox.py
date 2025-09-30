@@ -22,27 +22,27 @@ class FlexBox(UIContainer):
         Add a pygame_gui element to the flexbox.
         If width or height is not set, only allow absolute pixel sizes for that dimension.
         """
-        if self.width_prop is None and width_percent is not None:
+        if self.width_prop is None and width_percent is not None and not isinstance(self.ui_container, FlexBox):
             raise ValueError("Cannot use width_percent when FlexBox width is None. Use width_px instead.")
-        if self.height_prop is None and height_percent is not None:
+        if self.height_prop is None and height_percent is not None and not isinstance(element, FlexBox) and not isinstance(self.ui_container, FlexBox):
             raise ValueError("Cannot use height_percent when FlexBox height is None. Use height_px instead.")
         element.set_container(self)
         self.element_data.append((element, width_percent, height_percent, width_px, height_px))
         self.rebuild_sizes()
 
     def insert_element(self, index: int, element: UIElement, width_percent: Optional[float] = None, height_percent: Optional[float] = None, width_px: Optional[int] = None, height_px: Optional[int] = None):
-        if self.width_prop is None and width_percent is not None:
+        if self.width_prop is None and width_percent is not None and not isinstance(self.ui_container, FlexBox):
             raise ValueError("Cannot use width_percent when FlexBox width is None. Use width_px instead.")
-        if self.height_prop is None and height_percent is not None:
+        if self.height_prop is None and height_percent is not None and not isinstance(self.ui_container, FlexBox):
             raise ValueError("Cannot use height_percent when FlexBox height is None. Use height_px instead.")
         element.set_container(self)
         self.element_data.insert(index, (element, width_percent, height_percent, width_px, height_px))
         self.rebuild_sizes()
 
     def replace_element(self, index: int, element: UIElement, width_percent: Optional[float] = None, height_percent: Optional[float] = None, width_px: Optional[int] = None, height_px: Optional[int] = None):
-        if self.width_prop is None and width_percent is not None and self.element_data[index][1] is not None:
+        if self.width_prop is None and width_percent is not None and self.element_data[index][1] is not None and not isinstance(self.ui_container, FlexBox):
             raise ValueError("Cannot use width_percent when FlexBox width is None. Use width_px instead.")
-        if self.height_prop is None and height_percent is not None and self.element_data[index][2] is not None:
+        if self.height_prop is None and height_percent is not None and self.element_data[index][2] is not None and not isinstance(self.ui_container, FlexBox):
             raise ValueError("Cannot use height_percent when FlexBox height is None. Use height_px instead.")
         self.element_data[index][0].kill()
         element.set_container(self)
@@ -55,21 +55,29 @@ class FlexBox(UIContainer):
             return self
         width, height = self.width_prop, self.height_prop
         if self.direction == 'horizontal':
-            if width is None:
+            if width is None and not isinstance(self.ui_container, FlexBox):
                 total_width = sum(wpx if wpx is not None else 0 for _, _, _, wpx, _ in self.element_data)
                 total_width += self.gap * (n - 1) + 2 * self.margin
                 width = total_width
-            if height is None:
+            elif width is None:
+                width = self.relative_rect[2]
+            if height is None and not isinstance(self.ui_container, FlexBox):
                 max_height = max(hpx if hpx is not None else 1 for _, _, _, _, hpx in self.element_data)
                 height = max_height + 2 * self.margin
+            elif height is None:
+                height = self.relative_rect[3]
         else:  # vertical
-            if height is None:
+            if height is None and not isinstance(self.ui_container, FlexBox):
                 total_height = sum(hpx if hpx is not None else 0 for _, _, _, _, hpx in self.element_data)
                 total_height += self.gap * (n - 1) + 2 * self.margin
                 height = total_height
-            if width is None:
+            elif height is None:
+                height = self.relative_rect[3]
+            if width is None and not isinstance(self.ui_container, FlexBox):
                 max_width = max(wpx if wpx is not None else 1 for _, _, _, wpx, _ in self.element_data)
                 width = max_width + 2 * self.margin
+            elif width is None:
+                height = self.relative_rect[2]
         if self.direction == 'horizontal':
             total_specified = sum(w for _, w, _, _, _ in self.element_data if w is not None)
             unspecified = [i for i, (_, w, _, _, _) in enumerate(self.element_data) if w is None]
