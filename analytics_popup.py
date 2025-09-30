@@ -5,7 +5,6 @@ from collections import defaultdict
 import matplotlib
 import numpy as np
 import pygame
-from pygame_gui.core import ObjectID
 from flexbox import FlexBox
 from save_system import SaveSystem
 
@@ -66,6 +65,38 @@ def _render_overall_score(analytics, big_font, flex_box):
         height_px=score_surf.get_height(),
         width_px=score_surf.get_width(),
     )
+
+
+def _matplotlib_spider_chart(analytics, width, height):
+    labels = np.array(['Accuracy', 'Relative', 'Absolute', 'Legato'])
+    values = np.array([
+        analytics.get('accuracy', 0),
+        analytics.get('relative', 0),
+        analytics.get('absolute', 0),
+        1.0 - analytics.get('legato_severity', 0)
+    ])
+    values = np.append(values, values[0])
+    angles = np.linspace(0, 2 * np.pi, len(labels), endpoint=False)
+    angles = np.append(angles, angles[0])
+    fig = plt.figure(figsize=(width / 100, height / 100), dpi=100)
+    ax = fig.add_subplot(111, polar=True)
+    ax.plot(angles, values, 'o-', linewidth=2, color='#50c878')
+    ax.fill(angles, values, alpha=0.25, color='#50c878')
+    ax.set_ylim(0, 1)
+    ax.set_title('Performance Metrics', y=1.1, color='white')
+    ax.grid(True, color='white', alpha=0.3)
+    ax.tick_params(colors='white')
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(labels, color='white', fontsize=10)
+    fig.patch.set_alpha(0)
+    ax.set_facecolor((0, 0, 0, 0))
+    plt.tight_layout()
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', transparent=True)
+    plt.close(fig)
+    buf.seek(0)
+    img = pygame.image.load(buf, 'spider_chart.png').convert_alpha()
+    return img
 
 
 class UIManagerWithOffset(pygame_gui.UIManager):
@@ -150,10 +181,20 @@ class AnalyticsPopup:
                                                                          dims[0] - self._margin * 2,
                                                                          dims[1] - self._margin * 2), gap=12)
 
-                left_side = FlexBox(manager=self._ui_manager, relative_rect=pygame.Rect(0, 0, 0, 0), gap=12, align_y="start", direction="vertical")
+                left_side = FlexBox(manager=self._ui_manager, relative_rect=pygame.Rect(0, 0, 0, 0), gap=12,
+                                    align_y="start", direction="vertical")
                 self._main_container.place_element(left_side, width_percent=0.6, height_percent=1)
                 self._render_title(left_side)
                 _render_overall_score(self._analytics, self._big_font, left_side)
+
+                radar_chart = pygame_gui.elements.UIImage(
+                    image_surface=pygame.Surface((100, 100), pygame.SRCALPHA),
+                    relative_rect=pygame.Rect(0, 0, 100, 100),
+                )
+                left_side.place_element(radar_chart, width_percent=1, height_percent=0.5)
+                if self._analytics:
+                    radar_chart.set_image(_matplotlib_spider_chart(self._analytics, radar_chart.relative_rect[2], radar_chart.relative_rect[3]))
+
                 self._main_container.place_element(_generate_tips(self._analytics), width_percent=0.4, height_percent=1)
 
             now = pygame.time.get_ticks()
@@ -208,7 +249,8 @@ class AnalyticsPopup:
 
     def _render_title(self, parent):
         title_surf = self._font.render('Performance Analytics for', True, (255, 255, 255))
-        container = FlexBox(manager=self._ui_manager, relative_rect=pygame.Rect(self._margin, self._margin, 0, title_surf.get_height()), gap=12)
+        container = FlexBox(manager=self._ui_manager,
+                            relative_rect=pygame.Rect(self._margin, self._margin, 0, title_surf.get_height()), gap=12)
         parent.place_element(container, height_px=title_surf.get_height(), width_percent=1)
         container.place_element(pygame_gui.elements.UIImage(
             image_surface=title_surf,
