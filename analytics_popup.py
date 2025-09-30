@@ -454,6 +454,8 @@ class AnalyticsPopup:
                 return {}
 
             start_chord_idx, end_chord_idx = self._get_section_bounds()
+            start_chord_idx -= from_start_idx
+            end_chord_idx -= from_start_idx
             from_midi_msgs = _filter_midi_messages_by_section(from_midi_msgs, from_times, start_chord_idx, len(from_times) - 1)
             to_midi_msgs = _filter_midi_messages_by_section(to_midi_msgs, to_times, 0, end_chord_idx - len(from_times))
             max_from_time = 0
@@ -593,5 +595,5 @@ class AnalyticsPopup:
         with self.save_system.guided_teacher_data as s:
             if not s.file_exists(f"measure_{self._selected_measure}/section_{self._selected_section}/section.json"):
                 raise FileNotFoundError(f"Section {self._selected_section} not found in measure {self._selected_measure}")
-            info = json.loads(s.load_file(f"measure_{self._selected_measure}/section_{self._selected_section}/section.json"))
+            info = json.loads(s.load_file(f"measure_{self._selected_measure}/section_{self._selected_section}/section.json"))["section"]
             return info["start_idx"], info["end_idx"]
