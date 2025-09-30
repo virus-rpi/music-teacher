@@ -518,17 +518,45 @@ class AnalyticsPopup:
         if not all_notes:
             return
 
-        min_pitch, max_pitch = min(all_notes), max(all_notes)
-        pitch_range = max_pitch - min_pitch + 1
+        used_pitches = sorted(set(all_notes))
         vertical_padding = 32
         padded_top = rect.top + vertical_padding
         padded_bottom = rect.bottom - vertical_padding
         padded_height = padded_bottom - padded_top
-        bar_height = padded_height / pitch_range
+        gap_threshold = 8
 
-        def pitch_to_y(note):
-            rel = (note - min_pitch) / max(1, pitch_range)
-            return padded_bottom - rel * padded_height
+        slots = [pitch if pitch in used_pitches else None for pitch in range(min(used_pitches), max(used_pitches) + 1)]
+        slots_with_merged_gaps = []
+        gaps = []
+        i = 0
+        while i < len(slots):
+            if slots[i] is not None:
+                slots_with_merged_gaps.append(slots[i])
+                i += 1
+                continue
+            gap_start = i
+            while i < len(slots) and slots[i] is None:
+                i += 1
+            gap_size = i - gap_start
+            if gap_size >= gap_threshold:
+                gaps.append(len(slots_with_merged_gaps))
+                slots_with_merged_gaps.append(None)
+            else:
+                slots_with_merged_gaps.extend([None] * gap_size)
+
+        def pitch_to_y(pitch):
+            if pitch not in slots_with_merged_gaps:
+                return None
+            slot_index = slots_with_merged_gaps.index(pitch)
+            return padded_bottom - slot_index * (padded_height / len(slots_with_merged_gaps))
+
+        bar_height = padded_height / len(slots_with_merged_gaps)
+
+        gap_color = (128, 128, 128)
+        for gap_index in gaps:
+            y = padded_bottom - gap_index * (padded_height / len(slots_with_merged_gaps))
+            pygame.draw.line(surface, gap_color, (rect.left, y), (rect.right, y), 2)
+
         expected_times_list = []
         for track in expected_midi_msgs.values() if expected_midi_msgs else []:
             for msg in track:
