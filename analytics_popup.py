@@ -132,6 +132,39 @@ class ElementSurface:
         self.parent_surface.blit(self.surface, (self.x, self.y))
 
 
+def _filter_midi_messages_by_section(midi_msgs, chord_times, start_chord_idx, end_chord_idx):
+    """Filter MIDI messages to only include those within the specified chord index range."""
+    if not midi_msgs or not chord_times or start_chord_idx >= len(chord_times):
+        return {}
+    start_time = chord_times[start_chord_idx] if start_chord_idx < len(chord_times) else 0
+    end_time = chord_times[end_chord_idx] if end_chord_idx < len(chord_times) else float('inf')
+
+    filtered_msgs = {}
+    for track_idx, messages in midi_msgs.items():
+        filtered_track = []
+        notes_started_in_section = set()
+
+        for msg in messages:
+            msg_time = getattr(msg, 'time', 0)
+
+            if msg.type == "note_on" and msg.velocity > 0:
+                if start_time <= msg_time < end_time:
+                    filtered_track.append(msg)
+                    notes_started_in_section.add(msg.note)
+            elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
+                if msg.note in notes_started_in_section or (start_time <= msg_time < end_time):
+                    filtered_track.append(msg)
+                    notes_started_in_section.discard(msg.note)
+            else:
+                if start_time <= msg_time < end_time:
+                    filtered_track.append(msg)
+
+        if filtered_track:
+            filtered_msgs[track_idx] = filtered_track
+
+    return filtered_msgs
+
+
 class AnalyticsPopup:
     def __init__(self, teacher, save_system: SaveSystem):
         self.teacher = teacher
@@ -343,6 +376,15 @@ class AnalyticsPopup:
             unpacked = False,
         )
         expected_chords, expected_times, expected_midi_msgs = measure_data.chords, measure_data.times, measure_data.midi_msgs
+  
+        try:
+            start_chord_idx, end_chord_idx = self._get_section_bounds()
+            expected_midi_msgs = _filter_midi_messages_by_section(
+                expected_midi_msgs, expected_times, start_chord_idx, end_chord_idx
+            )
+        except (FileNotFoundError, json.JSONDecodeError, KeyError):
+            pass
+        
         performed_notes = self.teacher.midi_teacher.get_performed_notes_for_measure(
             self._selected_measure, self._selected_section, self._selected_pass
         )
@@ -353,6 +395,7 @@ class AnalyticsPopup:
             all_notes += [msg.note for msg in performed_notes if msg.type in ("note_on", "note_off")]
         if not all_notes:
             return
+
         min_pitch, max_pitch = min(all_notes), max(all_notes)
         pitch_range = max_pitch - min_pitch + 1
         vertical_padding = 32
@@ -360,6 +403,7 @@ class AnalyticsPopup:
         padded_bottom = rect.bottom - vertical_padding
         padded_height = padded_bottom - padded_top
         bar_height = padded_height / pitch_range
+
         def pitch_to_y(note):
             rel = (note - min_pitch) / max(1, pitch_range)
             return padded_bottom - rel * padded_height
@@ -374,9 +418,11 @@ class AnalyticsPopup:
         def expected_time_to_x(time):
             norm = time / max_expected_time if max_expected_time > 0 else 0
             return rect.left + norm * rect.width
+
         def performed_time_to_x(time):
             norm = time / max_performed_time if max_performed_time > 0 else 0
             return rect.left + norm * rect.width
+
         expected_onsets = {}
         for track_index, track in enumerate(expected_midi_msgs.values() if expected_midi_msgs else []):
             for msg in track:
@@ -400,6 +446,14 @@ class AnalyticsPopup:
                     x1 = performed_time_to_x(onset)
                     x2 = performed_time_to_x(getattr(msg, "time", 0))
                     y = pitch_to_y(msg.note)
-                    pygame.draw.rect(surface, performed_color, pygame.Rect(x1, y - bar_height / 2, max(1, x2 - x1), bar_height), border_radius=8)
+                    pygame.draw.rect(surface, performed_color,
+                                   pygame.Rect(x1, y - bar_height / 2, max(1, x2 - x1), bar_height), border_radius=8)
 
         surface_element.set_image(surface)
+
+    def _get_section_bounds(self):
+        with self.save_system.guided_teacher_data as s:
+            if not s.file_exists(f"measure_{self._selected_measure}/section_{self._selected_section}/section.json"):
+                raise FileNotFoundError(f"Section {self._selected_section} not found in measure {self._selected_measure}")
+            info = json.loads(s.load_file(f"measure_{self._selected_measure}/section_{self._selected_section}/section.json"))
+            return info["start_idx"], info["end_idx"]

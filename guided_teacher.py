@@ -203,7 +203,7 @@ class PracticeSectionTask(Task):
                 "absolute_timing": evaluator.score.absolute_timing,
             }
             self.teacher.save_pass(self.measure, section_idx, pass_idx, analytics,
-                                   self.recording.copy())
+                                   self.recording.copy(), self.section)
         else:
             print(f"Could not find section {self.section.start_idx} {self.section.end_idx} in measure {self.measure}")
 
@@ -485,8 +485,10 @@ class GuidedTeacher:
         self.guide_text = d.get('guide_text', None)
         self.pass_index = d.get('pass_index', {})
 
-    def save_pass(self, measure_idx, section_idx, pass_idx, analytics, recording):
+    def save_pass(self, measure_idx, section_idx, pass_idx, analytics, recording, section: MeasureSection):
         with self.save_system as s:
+            if pass_idx == 0:
+                s.save_file(f"measure_{measure_idx}/section_{section_idx}/section.json", json.dumps({'section': asdict(section), 'timestamp': time.time()}, indent=2, default=str))
             s.save_file(f"measure_{measure_idx}/section_{section_idx}/pass_{pass_idx}.json", json.dumps({'analytics': analytics, 'timestamp': time.time()}, indent=2, default=str))
             if recording is not None and isinstance(recording, mido.MidiTrack):
                 mid = mido.MidiFile()
@@ -496,21 +498,3 @@ class GuidedTeacher:
         section_key = str(section_idx)
         self.pass_index[measure_key] = self.pass_index.get(measure_key, {})
         self.pass_index[measure_key][section_key] = self.pass_index[measure_key].get(section_key, 0) + 1
-
-    def load_pass(self, measure_idx, section_idx, pass_idx):
-        analytics, score, recording = None, None, None
-        with self.save_system as s:
-            try:
-                d = json.loads(s.load_file(f"measure_{measure_idx}/section_{section_idx}/pass_{pass_idx}.json"))
-                if d:
-                    analytics = d.get('analytics')
-                    score = d.get('score')
-            except (FileNotFoundError, json.JSONDecodeError):
-                print(f"Failed to load pass {pass_idx}")
-            try:
-                mid = mido.MidiFile(s.get_absolute_path(f"measure_{measure_idx}/section_{section_idx}/pass_{pass_idx}.mid"))
-                if mid.tracks:
-                    recording = mid.tracks[0]
-            except (FileNotFoundError, mido.KeySignatureError):
-                print(f"Failed to load recording for pass {pass_idx}")
-        return analytics, score, recording
