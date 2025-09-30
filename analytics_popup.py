@@ -7,6 +7,7 @@ import numpy as np
 import pygame
 from flexbox import FlexBox
 from save_system import SaveSystem
+from pprint import pprint
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -413,14 +414,18 @@ class AnalyticsPopup:
                 if hasattr(msg, "time"):
                     expected_times_list.append(getattr(msg, "time", 0))
         performed_times_list = [getattr(msg, "time", 0) for msg in performed_notes if hasattr(msg, "time")]
+        min_expected_time = min(expected_times_list) if expected_times_list else 0
         max_expected_time = max(expected_times_list) if expected_times_list else 1
+        expected_time_range = max_expected_time - min_expected_time if max_expected_time > min_expected_time else 1
+        min_performed_time = min(performed_times_list) if performed_times_list else 0
         max_performed_time = max(performed_times_list) if performed_times_list else 1
+        performed_time_range = max_performed_time - min_performed_time if max_performed_time > min_performed_time else 1
         def expected_time_to_x(time):
-            norm = time / max_expected_time if max_expected_time > 0 else 0
+            norm = (time - min_expected_time) / expected_time_range if expected_time_range > 0 else 0
             return rect.left + norm * rect.width
 
         def performed_time_to_x(time):
-            norm = time / max_performed_time if max_performed_time > 0 else 0
+            norm = (time - min_performed_time) / performed_time_range if performed_time_range > 0 else 0
             return rect.left + norm * rect.width
 
         expected_onsets = {}
@@ -435,8 +440,11 @@ class AnalyticsPopup:
                         x2 = expected_time_to_x(getattr(msg, "time", 0))
                         y = pitch_to_y(msg.note)
                         pygame.draw.rect(surface,  (80, 160, 255) if track_index == 0 else (200, 0, 0), pygame.Rect(x1, y - bar_height / 2, max(1, x2 - x1), bar_height), border_radius=8)
+
+        pprint(performed_notes)
+        performed_surface = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
         performed_onsets = {}
-        performed_color = pygame.Color(0, 200, 0, 128)
+        performed_color = (0, 200, 0, 128)
         for msg in performed_notes:
             if msg.type == "note_on" and msg.velocity > 0:
                 performed_onsets[msg.note] = getattr(msg, "time", 0)
@@ -446,8 +454,10 @@ class AnalyticsPopup:
                     x1 = performed_time_to_x(onset)
                     x2 = performed_time_to_x(getattr(msg, "time", 0))
                     y = pitch_to_y(msg.note)
-                    pygame.draw.rect(surface, performed_color,
-                                   pygame.Rect(x1, y - bar_height / 2, max(1, x2 - x1), bar_height), border_radius=8)
+                    pygame.draw.rect(performed_surface, performed_color,
+                                   pygame.Rect(x1, y - bar_height / 2, max(20, x2 - x1), bar_height), border_radius=8)
+
+        surface.blit(performed_surface, (0, 0))
 
         surface_element.set_image(surface)
 
