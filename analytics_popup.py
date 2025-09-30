@@ -478,8 +478,12 @@ class AnalyticsPopup:
 
             try:
                 start_chord_idx, end_chord_idx = self._get_section_bounds()
+                measure_start_idx = measure_data.start_index
+                relative_start_idx = start_chord_idx - measure_start_idx
+                relative_end_idx = end_chord_idx - measure_start_idx
+
                 expected_midi_msgs = _filter_midi_messages_by_section(
-                    expected_midi_msgs, expected_times, start_chord_idx, end_chord_idx
+                    expected_midi_msgs, expected_times, relative_start_idx, relative_end_idx
                 )
             except (FileNotFoundError, json.JSONDecodeError, KeyError):
                 pass
