@@ -500,8 +500,8 @@ class AnalyticsPopup:
             relative_rect=pygame.Rect(0, 0, 100, 100),
         )
         flexbox.place_element(surface_element, width_percent=1, height_percent="max")
-        rect = pygame.Rect(0, 0, surface_element.relative_rect[2], surface_element.relative_rect[3])
-        surface = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+        rect = pygame.Rect(0, 0, surface_element.relative_rect[2]-8, surface_element.relative_rect[3])
+        surface = pygame.Surface((rect.width+8, rect.height), pygame.SRCALPHA)
 
         pygame.draw.rect(surface, (20, 20, 20), rect, border_radius=8)
 
@@ -560,6 +560,8 @@ class AnalyticsPopup:
             return rect.left + norm * rect.width
 
         expected_onsets = {}
+        left_hand_color = (80, 150, 255)
+        right_hand_color = (255, 80, 80)
         for track_index, track in enumerate(expected_midi_msgs.values() if expected_midi_msgs else []):
             for msg in track:
                 if msg.type == "note_on" and msg.velocity > 0:
@@ -570,11 +572,15 @@ class AnalyticsPopup:
                         x1 = expected_time_to_x(onset)
                         x2 = expected_time_to_x(getattr(msg, "time", 0))
                         y = pitch_to_y(msg.note)
-                        pygame.draw.rect(surface,  (80, 160, 255) if track_index == 0 else (200, 0, 0), pygame.Rect(x1, y - bar_height / 2, max(1, x2 - x1), bar_height), border_radius=8)
+                        note_rect = pygame.Rect(x1, y - bar_height / 2, max(1, x2 - x1), bar_height)
+                        color = right_hand_color if track_index == 0 else left_hand_color
+                        pygame.draw.rect(surface, color, note_rect, border_radius=8)
+                        border_color = tuple(max(0, c - 60) for c in color)
+                        pygame.draw.rect(surface, border_color, note_rect, 2, border_radius=8)
 
         performed_surface = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
         performed_onsets = {}
-        performed_color = (0, 200, 0, 128)
+        performed_color = (255, 200, 0, 180)
         for msg in performed_notes_absolute:
             if msg.type == "note_on" and msg.velocity > 0:
                 performed_onsets[msg.note] = msg.time
@@ -584,11 +590,10 @@ class AnalyticsPopup:
                     x1 = performed_time_to_x(onset)
                     x2 = performed_time_to_x(msg.time)
                     y = pitch_to_y(msg.note)
-                    pygame.draw.rect(performed_surface, performed_color,
-                                   pygame.Rect(x1, y - bar_height / 2, max(20, x2 - x1), bar_height), border_radius=8)
-
-        surface.blit(performed_surface, (0, 0))
-
+                    note_rect = pygame.Rect(x1, y - bar_height / 2, max(2, x2 - x1), bar_height)
+                    pygame.draw.rect(performed_surface, performed_color, note_rect, border_radius=8)
+                    pygame.draw.rect(performed_surface, (80, 60, 0, 220), note_rect, 2, border_radius=8)
+        surface.blit(performed_surface, (0, 0), special_flags=pygame.BLEND_ALPHA_SDL2)
         surface_element.set_image(surface)
 
     def _get_section_bounds(self):
