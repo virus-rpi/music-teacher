@@ -266,13 +266,7 @@ class MidiTeacher:
             else:
                 start_index = end_index = chord_idx
 
-            measure_midi_msgs = defaultdict(list)
-            for track_index, track in enumerate(self.midi.tracks):
-                abs_tick = 0
-                for msg in track:
-                    abs_tick += getattr(msg, 'time', 0)
-                    if start_tick <= abs_tick < end_tick and msg.type in ('note_on', 'note_off'):
-                        measure_midi_msgs[track_index].append(msg.copy(time=abs_tick-start_tick))
+            measure_midi_msgs = {i: track for i, track in enumerate(self.get_midi_messages_between_indices(start_index, end_index))}
 
             self.measures.append(MeasureData(
                 chords=tuple(measure_chords),
@@ -307,3 +301,25 @@ class MidiTeacher:
         except (FileNotFoundError, OSError, Exception) as e:
             print(f"Failed to load performed notes for measure {measure_index}, section {section}, pass {pass_num}: {e}")
             return []
+
+    def get_midi_messages_between_indices(self, start_idx: int, end_idx: int) -> tuple[mido.MidiTrack, mido.MidiTrack]:
+        """
+        Returns two mido.MidiTrack objects (right_hand_track, left_hand_track) containing all MIDI messages
+        between the absolute times of the given chord indices (inclusive start, exclusive end).
+        """
+        if not self.chord_times or start_idx >= len(self.chord_times) or end_idx > len(self.chord_times):
+            return mido.MidiTrack(), mido.MidiTrack()
+        start_tick = self.chord_times[start_idx]
+        if end_idx >= len(self.chord_times):
+            end_tick = self.chord_times[-1] + 1
+        else:
+            end_tick = self.chord_times[end_idx]
+
+        measure_midi_msgs = defaultdict(mido.MidiTrack)
+        for track_index, track in enumerate(self.midi.tracks):
+            abs_tick = 0
+            for msg in track:
+                abs_tick += getattr(msg, 'time', 0)
+                if start_tick <= abs_tick < end_tick and msg.type in ('note_on', 'note_off'):
+                    measure_midi_msgs[track_index].append(msg.copy(time=abs_tick - start_tick))
+        return measure_midi_msgs[0], measure_midi_msgs[1]

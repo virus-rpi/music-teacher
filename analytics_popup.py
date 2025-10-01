@@ -208,40 +208,6 @@ class ElementSurface:
         self.parent_surface.blit(self.surface, (self.x, self.y))
 
 
-def _filter_midi_messages_by_section(midi_msgs, chord_times, start_chord_idx, end_chord_idx):
-    """Filter MIDI messages to only include those within the specified chord index range."""
-    if not midi_msgs or not chord_times or start_chord_idx >= len(chord_times):
-        return {}
-    start_time = chord_times[start_chord_idx] if start_chord_idx < len(chord_times) else 0
-    if end_chord_idx < len(chord_times):
-        if end_chord_idx + 1 < len(chord_times):
-            end_time = chord_times[end_chord_idx + 1]
-        else:
-            end_time = float('inf')
-    else:
-        end_time = float('inf')
-    filtered_msgs = {}
-    for track_idx, messages in midi_msgs.items():
-        filtered_track = []
-        notes_started_in_section = set()
-        for msg in messages:
-            msg_time = getattr(msg, 'time', 0)
-            if msg.type == "note_on" and msg.velocity > 0:
-                if start_time <= msg_time < end_time:
-                    filtered_track.append(msg)
-                    notes_started_in_section.add(msg.note)
-            elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
-                if msg.note in notes_started_in_section or (start_time <= msg_time < end_time):
-                    filtered_track.append(msg)
-                    notes_started_in_section.discard(msg.note)
-            else:
-                if start_time <= msg_time < end_time:
-                    filtered_track.append(msg)
-        if filtered_track:
-            filtered_msgs[track_idx] = filtered_track
-    return filtered_msgs
-
-
 class AnalyticsPopup:
     def __init__(self, teacher, save_system: SaveSystem):
         self.teacher = teacher
@@ -444,56 +410,8 @@ class AnalyticsPopup:
             return analytics
 
     def _get_expected_notes_for_section(self):
-        """Get expected notes for the current section, handling transition sections specially."""
-        if self._selected_section == "transition":
-            from_measure = self._selected_measure
-            to_measure = self._selected_measure + 1
-            from_chords, from_times, from_xs, _, (from_start_idx, _), from_midi_msgs = self.teacher.midi_teacher.get_notes_for_measure(from_measure)
-            to_chords, to_times, to_xs, _, (to_start_idx, _), to_midi_msgs = self.teacher.midi_teacher.get_notes_for_measure(to_measure)
-
-            if not from_chords or not to_chords:
-                return {}
-
-            start_chord_idx, end_chord_idx = self._get_section_bounds()
-            start_chord_idx -= from_start_idx
-            end_chord_idx -= from_start_idx
-            from_midi_msgs = _filter_midi_messages_by_section(from_midi_msgs, from_times, start_chord_idx, len(from_times) - 1)
-            to_midi_msgs = _filter_midi_messages_by_section(to_midi_msgs, to_times, 0, end_chord_idx - len(from_times))
-            max_from_time = 0
-            for track in from_midi_msgs.values():
-                for msg in track:
-                    max_from_time = max(max_from_time, getattr(msg, 'time', 0))
-            time_offset = max_from_time + 100
-            filtered_midi_msgs = defaultdict(list)
-            for track_idx, messages in from_midi_msgs.items():
-                filtered_midi_msgs[track_idx].extend(messages)
-            for track_idx, messages in to_midi_msgs.items():
-                for msg in messages:
-                    adjusted_msg = msg.copy()
-                    adjusted_msg.time = getattr(msg, 'time', 0) + time_offset
-                    filtered_midi_msgs[track_idx].append(adjusted_msg)
-
-            return filtered_midi_msgs
-        else:
-            measure_data = self.teacher.midi_teacher.get_notes_for_measure(
-                self._selected_measure,
-                unpacked=False,
-            )
-            expected_chords, expected_times, expected_midi_msgs = measure_data.chords, measure_data.times, measure_data.midi_msgs
-
-            try:
-                start_chord_idx, end_chord_idx = self._get_section_bounds()
-                measure_start_idx = measure_data.start_index
-                relative_start_idx = start_chord_idx - measure_start_idx
-                relative_end_idx = end_chord_idx - measure_start_idx
-
-                expected_midi_msgs = _filter_midi_messages_by_section(
-                    expected_midi_msgs, expected_times, relative_start_idx, relative_end_idx
-                )
-            except (FileNotFoundError, json.JSONDecodeError, KeyError):
-                pass
-
-            return expected_midi_msgs
+        """Get expected notes for the current section."""
+        return {i: track for i, track in enumerate(self.teacher.midi_teacher.get_midi_messages_between_indices(*self._get_section_bounds()))}
 
     def _render_pianoroll(self, flexbox: FlexBox):
         surface_element = pygame_gui.elements.UIImage(
