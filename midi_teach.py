@@ -1,4 +1,5 @@
-from bisect import bisect_left
+import time
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 import mido
 from save_system import SaveSystem
@@ -29,10 +30,13 @@ class MidiTeacher:
         self.loop_end = max(0, len(self.chords) - 1)
         self._last_wrapped = False
         self.measures: list[MeasureData] = []
-        self._set_measure_data()
+
+        self._build_tempo_map()
         self._preprocess_track_indices()
+        self._set_measure_data()
 
     def _extract_chords(self):
+        timer = time.perf_counter()
         events = []
         note_on_times = {}
         note_durations = []
@@ -81,6 +85,7 @@ class MidiTeacher:
                     chord_notes_with_durations.append((note, hand_map.get(track_idx, 'R'), t, t))
             chords_with_durations.append(chord_notes_with_durations)
         self.chord_notes_with_durations = chords_with_durations
+        print(f"Extracted {len(chords)} chords in {time.perf_counter() - timer:.3f} seconds")
         return chords, times
 
     def get_next_notes(self):
@@ -200,6 +205,59 @@ class MidiTeacher:
         self._last_wrapped = False
         return w
 
+    def _build_tempo_map(self):
+        """Build a global tempo map from all tracks: list of segments with start_tick, ms_per_tick, and cumulative ms."""
+        timer = time.perf_counter()
+        ticks_per_beat = self.midi.ticks_per_beat
+        default_tempo_us_per_beat = 500000  # 120 BPM
+        tempo_changes: list[tuple[int, int]] = []
+        for track in self.midi.tracks:
+            abs_tick = 0
+            for msg in track:
+                abs_tick += getattr(msg, 'time', 0)
+                if msg.type == 'set_tempo':
+                    tempo_changes.append((abs_tick, int(msg.tempo)))
+        tempo_changes.sort(key=lambda x: x[0])
+        if not tempo_changes or tempo_changes[0][0] != 0:
+            tempo_changes = [(0, default_tempo_us_per_beat)] + tempo_changes
+        else:
+            pass
+        collapsed: list[tuple[int, int]] = []
+        for tick, tempo in tempo_changes:
+            if collapsed and collapsed[-1][0] == tick:
+                collapsed[-1] = (tick, tempo)
+            else:
+                collapsed.append((tick, tempo))
+        self._tempo_changes = collapsed
+        self._tempo_segment_starts: list[int] = []
+        self._tempo_segments: list[tuple[int, float, float]] = []
+        cum_ms = 0.0
+        for i, (start_tick, tempo_us) in enumerate(collapsed):
+            ms_per_tick = (tempo_us / 1000.0) / float(ticks_per_beat)
+            self._tempo_segment_starts.append(start_tick)
+            self._tempo_segments.append((start_tick, ms_per_tick, cum_ms))
+            if i + 1 < len(collapsed):
+                next_tick = collapsed[i + 1][0]
+                if next_tick > start_tick:
+                    cum_ms += (next_tick - start_tick) * ms_per_tick
+        print(f"Built tempo map with {len(self._tempo_segments)} segments in {time.perf_counter() - timer:.3f} seconds")
+
+    def _tick_to_ms(self, tick: int) -> float:
+        """Convert an absolute tick to absolute milliseconds using tempo segments."""
+        if not self._tempo_segments:
+            return 0.0
+        idx = bisect_right(self._tempo_segment_starts, tick) - 1
+        if idx < 0:
+            idx = 0
+        start_tick, ms_per_tick, cum_ms_at_start = self._tempo_segments[idx]
+        return cum_ms_at_start + (tick - start_tick) * ms_per_tick
+
+    def _tick_duration_to_ms(self, tick: int, duration: int) -> float:
+        """Convert an absolute tick and duration to absolute milliseconds using tempo segments."""
+        if not self._tempo_segments:
+            return 0.0
+        return  self._tick_to_ms(tick + duration) -  self._tick_to_ms(tick)
+
     def _get_measure_tick_boundaries(self):
         """Returns a list of (start_tick, end_tick) for each measure in the MIDI file."""
         ticks_per_beat = self.midi.ticks_per_beat
@@ -234,6 +292,7 @@ class MidiTeacher:
         return measure_boundaries
 
     def _set_measure_data(self):
+        timer = time.perf_counter()
         if not self.sheet_music_renderer:
             return
         measure_data = self.sheet_music_renderer.measure_data
@@ -279,6 +338,7 @@ class MidiTeacher:
                 end_index=end_index,
                 midi_msgs=dict(measure_midi_msgs),
             ))
+        print(f"Built measure data in {time.perf_counter() - timer:.3f} seconds")
 
     def get_notes_for_measure(self, measure_index, unpacked=True) -> tuple[tuple, tuple, tuple, tuple[int, int], tuple[int, int], dict[int, list[mido.Message]]] | MeasureData:
         """Returns (chords, times, note_xs, (start_x, end_x), (start_index, end_index), midi_msgs) for the given measure index."""
@@ -304,29 +364,32 @@ class MidiTeacher:
             return []
 
     def _preprocess_track_indices(self):
-        """Preprocess each track to build a tuple (ticks, msg_list) for fast range queries."""
+        """Preprocess each track to build a tuple (time_ms, msg_list) for fast range queries."""
+        timer = time.perf_counter()
         self._track_msg_indices = []
         for track in self.midi.tracks:
             abs_tick = 0
-            ticks = []
+            times_ms = []
             msg_list = []
             for msg in track:
+                delta_ms = int(self._tick_duration_to_ms(abs_tick, getattr(msg, 'time', 0)))
                 abs_tick += getattr(msg, 'time', 0)
-                ticks.append(abs_tick)
-                msg_list.append(msg)
-            self._track_msg_indices.append((ticks, msg_list))
+                times_ms.append(int(self._tick_to_ms(abs_tick)))
+                msg_list.append(msg.copy(time=delta_ms))
+            self._track_msg_indices.append((times_ms, msg_list))
+        print(f"Preprocessed track message indices in {time.perf_counter() - timer:.3f} seconds")
 
     def get_midi_messages_between_indices(self, start_idx: int, end_idx: int) -> tuple[mido.MidiTrack, mido.MidiTrack]:
         """
         Returns two mido.MidiTrack objects (right_hand_track, left_hand_track) containing all MIDI messages
-        between the absolute times of the given chord indices (inclusive start, exclusive end).
+        between the absolute times (in milliseconds) of the given chord indices (inclusive start, exclusive end).
         """
         if not self.chord_times or start_idx >= len(self.chord_times) or end_idx > len(self.chord_times):
             return mido.MidiTrack(), mido.MidiTrack()
-        start_tick = self.chord_times[start_idx]
-        end_tick = self.chord_times[-1] + 1 if end_idx >= len(self.chord_times) else self.chord_times[end_idx]
+        start_time = int(round(self._tick_to_ms(self.chord_times[start_idx])))
+        end_time = int(round(self._tick_to_ms(self.chord_times[-1] + 1 if end_idx >= len(self.chord_times) else self.chord_times[end_idx])))
         result_tracks = [mido.MidiTrack(), mido.MidiTrack()]
         for track_index, track_data in enumerate(getattr(self, '_track_msg_indices', [])):
-            ticks, msg_list = track_data
-            result_tracks[track_index].extend([msg_list[i].copy(time=ticks[i] - start_tick) for i in range(bisect_left(ticks, start_tick), bisect_left(ticks, end_tick))])
+            times_ms, msg_list = track_data
+            result_tracks[track_index].extend([msg_list[i].copy(time=times_ms[i] - start_time) for i in range(bisect_left(times_ms, start_time), bisect_left(times_ms, end_time))])
         return result_tracks[0], result_tracks[1]
