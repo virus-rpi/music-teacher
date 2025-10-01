@@ -6,6 +6,8 @@ from collections import defaultdict
 import matplotlib
 import numpy as np
 import pygame
+from mido import MidiTrack
+
 from flexbox import FlexBox
 from save_system import SaveSystem
 
@@ -477,8 +479,18 @@ class AnalyticsPopup:
             points = [(x, y + math.sin(0.4*x)) for x in range(rect.left + 64, rect.right - 64)]
             pygame.draw.aalines(surface, gap_color, False, points)
 
+        expected_notes_absolute = {0: MidiTrack(), 1: MidiTrack()}
+        first_time = None
+        for track_index, track in enumerate(expected_midi_msgs.values() if expected_midi_msgs else []):
+            current_time = 0
+            for msg in track:
+                if first_time is None:
+                    first_time = getattr(msg, 'time', 0)
+                current_time += getattr(msg, 'time', 0)
+                expected_notes_absolute[track_index].append(msg.copy(time=current_time-first_time))
+
         expected_times_list = []
-        for track in expected_midi_msgs.values() if expected_midi_msgs else []:
+        for track in expected_notes_absolute.values() if expected_notes_absolute else []:
             for msg in track:
                 if hasattr(msg, "time"):
                     expected_times_list.append(getattr(msg, "time", 0))
@@ -486,9 +498,7 @@ class AnalyticsPopup:
         current_time = 0
         for msg in performed_notes:
             current_time += getattr(msg, 'time', 0)
-            abs_msg = msg.copy()
-            abs_msg.time = current_time
-            performed_notes_absolute.append(abs_msg)
+            performed_notes_absolute.append(msg.copy(time = current_time))
 
         performed_times_list = [msg.time for msg in performed_notes_absolute if hasattr(msg, "time")]
 
@@ -510,7 +520,7 @@ class AnalyticsPopup:
         expected_onsets = {}
         left_hand_color = (80, 150, 255)
         right_hand_color = (255, 80, 80)
-        for track_index, track in enumerate(expected_midi_msgs.values() if expected_midi_msgs else []):
+        for track_index, track in enumerate(expected_notes_absolute.values() if expected_notes_absolute else []):
             for msg in track:
                 if msg.type == "note_on" and msg.velocity > 0:
                     expected_onsets[msg.note] = getattr(msg, "time", 0)
