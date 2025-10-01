@@ -37,7 +37,7 @@ class Task(ABC):
         pass
 
     @abstractmethod
-    def on_tick(self, pressed_notes, pressed_note_events, pygame_events):
+    def on_tick(self, pressed_notes: set[int], midi_events: list[mido.Message], pygame_events: list[pygame.event.Event]):
         pass
 
 class PlaybackMeasureTask(Task):
@@ -93,12 +93,12 @@ class PracticeSectionTask(Task):
         self.teacher.midi_teacher.loop_enabled = False
         self.teacher.current_section_visual_info = None
 
-    def on_tick(self, pressed_notes, pressed_note_events, pygame_events):
+    def on_tick(self, pressed_notes, midi_events, pygame_events):
         self._handle_pygame_events(pygame_events)
-        self._handle_midi_events(pressed_notes, pressed_note_events)
+        self._handle_midi_events(pressed_notes, midi_events)
 
         if self._waiting_for_wrap_release:
-            if not (self._wrap_pressed_notes & pressed_notes):
+            if not (self._wrap_pressed_notes & pressed_notes) and len(midi_events) == 0:
                 self._waiting_for_wrap_release = False
                 self._wrap_pressed_notes.clear()
                 self._handle_evaluate()
@@ -130,9 +130,10 @@ class PracticeSectionTask(Task):
                 elif event.key == pygame.K_SPACE:
                     self.teacher.synth.play_notes(self.section.chords, self.section.times, self.start_idx, self.teacher.midi_teacher.seek_to_index, self.teacher.midi_teacher.get_current_index())
 
-    def _handle_midi_events(self, pressed_notes: set[int], pressed_note_events):
-        if len(self.recording) == 0 and len(pressed_note_events) > 0:
-            times = [ev.time for ev in pressed_note_events if hasattr(ev, 'time') and ev.note in [n[0] for n in self.section.chords[0]]]
+    def _handle_midi_events(self, pressed_notes: set[int], midi_events: list[mido.Message]):
+        if len(self.recording) == 0 and len(midi_events) > 0:
+            first_chord = [n[0] for n in self.section.chords[0]]
+            times = [getattr(ev, 'time', None) for ev in midi_events if hasattr(ev, 'time') and hasattr(ev, 'note') and getattr(ev, 'note', None) in first_chord]
             if not times:
                 return
             earliest = min(times)
@@ -141,45 +142,28 @@ class PracticeSectionTask(Task):
         if self._last_record_time is None and self.timer_start is not None:
             self._last_record_time = self.timer_start
 
-        current = pressed_notes.copy()
-        new_notes = current - self._prev_pressed_notes
-        released_notes = self._prev_pressed_notes - current
+        if self.timer_start is not None:
+            for msg in midi_events:
+                t = getattr(msg, 'time', time.time())
+                if self._last_record_time is None:
+                    delta_ms = 0
+                else:
+                    delta_ms = max(int((t - self._last_record_time) * 1000), 0)
+                msg.time = delta_ms
+                self.recording.append(msg.copy(time=delta_ms))
+                self._last_record_time = t
 
-        def append_msg(msg: mido.Message, timestamp_s: float):
-            if self._last_record_time is None:
-                delta_ms = 0
-            else:
-                delta_ms = max(int((timestamp_s - self._last_record_time) * 1000), 0)
-            msg.time = delta_ms
-            self.recording.append(msg)
-            self._last_record_time = timestamp_s
-
-        for note in sorted(new_notes):
-            ev = next((ev for ev in pressed_note_events if ev.note == note), None)
-            if ev is not None and hasattr(ev, 'time'):
-                t = ev.time
-                vel = getattr(ev, 'velocity', 127)
-            else:
-                t = time.time()
-                vel = 127
-            append_msg(mido.Message('note_on', note=note, velocity=vel), t)
-
-        now = time.time()
-        for note in sorted(released_notes):
-            append_msg(mido.Message('note_off', note=note, velocity=0), now)
-
-        self._prev_pressed_notes = current
+        self._prev_pressed_notes = pressed_notes.copy()
 
     def _handle_evaluate(self):
         print(self.recording)
-        evaluator = Evaluator(self)
+        evaluator = Evaluator(self.recording, self.teacher.midi_teacher.get_midi_messages_between_indices(self.start_idx, self.end_idx+1))
         score = evaluator.score
-        guidance_text = evaluator.generate_guidance(score)
+        guidance_text = evaluator.tip
 
-        self.teacher.last_score = score.overall
-        self._save_pass(evaluator)
-        print(f"Eval: accuracy={score.accuracy:.3f} rel={score.relative_timing:.3f} abs={score.absolute_timing:.3f} -> score={score.overall:.3f}")
-        if score.overall > 0.95 and self.teacher.auto_advance:
+        self.teacher.last_score = score
+        # self._save_pass(evaluator)
+        if score > 0.95 and self.teacher.auto_advance:
             self.teacher.synth.play_success_sound()
             self.teacher.next_task()
             self.teacher.guide_text = "Great! " + guidance_text
@@ -324,7 +308,7 @@ class GuidedTeacher:
         self.current_task = None
         self.midi_teacher.loop_enabled, self.midi_teacher.loop_start, self.midi_teacher.loop_end = self._loop_info_before
 
-    def update(self, pressed_notes, pressed_note_events, pygame_events):
+    def update(self, pressed_notes, midi_events, pygame_events):
         if not self.is_active:
             return
 
@@ -340,7 +324,7 @@ class GuidedTeacher:
 
         if not self.current_task and self.tasks:
             self.next_task()
-        self.current_task.on_tick(pressed_notes, pressed_note_events, pygame_events)
+        self.current_task.on_tick(pressed_notes, midi_events, pygame_events)
 
         for event in pygame_events:
             if event.type == pygame.KEYDOWN:

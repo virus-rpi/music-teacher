@@ -1,432 +1,267 @@
-from dataclasses import dataclass
-import mido
-from typing import Optional
-from midi_teach import MidiTeacher
-
-# TODO: do analytics based on raw midi instead of chords to make sure the timing stuff is
-
-WEIGHTS = {
-    'accuracy': 0.6,
-    'relative': 0.25,
-    'absolute': 0.15,
-}
-
-assert WEIGHTS['accuracy'] + WEIGHTS['relative'] + WEIGHTS['absolute'] == 1.0, "Weights must sum to 1.0"
+from dataclasses import dataclass, field
+from pprint import pprint
+from typing import List, Optional
+import numpy as np
+from mido import MidiTrack
+import difflib
 
 
 @dataclass
-class Score:
-    accuracy: float
-    relative_timing: float
-    absolute_timing: float
-    overall: float
+class NoteEvaluation:
+    pitch_correct: bool
+    pitch_error: Optional[int] = None
+    onset_deviation_ms: float = 0.0
+    duration_deviation_ms: float = 0.0
+    velocity_deviation: float = 0.0
+    articulation: Optional[str] = None   # "staccato", "legato", "normal"
+    pedal_used: Optional[bool] = None
+    time_ms: Optional[int] = None        # onset time for later highlighting
+    comments: Optional[str] = None
+
+
+@dataclass
+class Issue:
+    time_ms: int
+    note: Optional[int] = None
+    severity: float = 0.0    # 0–1 scaled severity
+    category: str = ""       # e.g. "pitch", "timing", "dynamics", "pedal", "articulation"
+    description: str = ""
+
+
+@dataclass
+class PerformanceEvaluation:
+    notes: List[NoteEvaluation] = field(default_factory=list)
+    issues: List[Issue] = field(default_factory=list)
+
+    total_notes: int = 0
+    correct_notes: int = 0
+    wrong_notes: int = 0
+    missing_notes: int = 0
+    extra_notes: int = 0
+
+    avg_timing_deviation_ms: float = 0.0
+    avg_duration_deviation_ms: float = 0.0
+    avg_velocity_deviation: float = 0.0
+
+    rhythmic_stability: float = 0.0
+    tempo_consistency: float = 0.0
+    dynamic_balance: float = 0.0
+    pedal_accuracy: float = 0.0
+
+    phrasing_similarity: float = 0.0
+    hand_independence: float = 0.0
+    chord_accuracy: float = 0.0
+
+    overall_score: float = 0.0
+    comments: Optional[str] = None
+
+
+def _extract_notes_and_pedal(track: MidiTrack):
+    """
+    Extract notes and pedal events (CC64).
+    """
+    notes = []
+    pedals = []
+    current_time = 0
+    note_on = {}
+
+    for msg in track:
+        current_time += msg.time
+        if msg.type == "note_on" and msg.velocity > 0:
+            note_on[msg.note] = (current_time, msg.velocity)
+        elif msg.type in ("note_off", "note_on") and msg.note in note_on:
+            start_time, velocity = note_on.pop(msg.note)
+            duration = current_time - start_time
+            notes.append({
+                "pitch": msg.note,
+                "onset_ms": start_time,
+                "duration_ms": duration,
+                "velocity": velocity
+            })
+        elif msg.type == "control_change" and msg.control == 64:
+            pedals.append({"time_ms": current_time, "value": msg.value})
+
+    return notes, pedals
+
+
+def _match_notes(ref_notes, rec_notes):
+    ref_pitches = [n["pitch"] for n in ref_notes]
+    rec_pitches = [n["pitch"] for n in rec_notes]
+
+    matcher = difflib.SequenceMatcher(a=ref_pitches, b=rec_pitches, autojunk=False)
+    matches = []
+    extras = []
+
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            for k in range(i2 - i1):
+                matches.append((ref_notes[i1 + k], rec_notes[j1 + k]))
+        elif tag == "replace":
+            for k in range(min(i2 - i1, j2 - j1)):
+                matches.append((ref_notes[i1 + k], rec_notes[j1 + k]))
+            for k in range(i1 + (j2 - j1), i2):
+                matches.append((ref_notes[k], None))  # missing
+            for k in range(j1 + (i2 - i1), j2):
+                extras.append(rec_notes[k])  # extra
+        elif tag == "delete":
+            for k in range(i1, i2):
+                matches.append((ref_notes[k], None))
+        elif tag == "insert":
+            for k in range(j1, j2):
+                extras.append(rec_notes[k])
+
+    return matches, extras
+
+
+def _detect_articulation(duration, reference_duration):
+    """
+    Classify note articulation relative to reference.
+    """
+    ratio = duration / (reference_duration + 1e-6)
+    if ratio < 0.5:
+        return "staccato"
+    elif ratio > 1.2:
+        return "legato"
+    return "normal"
+
 
 class Evaluator:
-    def __init__(self, section_task):
-        self.section = section_task.section
-        self.start_idx = section_task.start_idx
-        self.end_idx = section_task.end_idx
-        self.recording = section_task.recording
-        self.teacher: MidiTeacher = section_task.teacher.midi_teacher
+    def __init__(self, recording: MidiTrack, reference: tuple[MidiTrack, MidiTrack]):
+        self.recording: MidiTrack = recording
+        self.reference: tuple[MidiTrack, MidiTrack] = reference
 
-        self._score = None
-        self.analytics: Optional[dict] = None
-
-    @property
-    def score(self):
-        if not self._score:
-            self._score = self._evaluate()
-        return self._score
-
-    def _detect_legato_per_chord(self, onsets, note_events):
-        """
-        For each chord transition, measure the total time (in ms) that notes from the previous chord overlap into the next chord.
-        Returns a list of floats (ms of overlap) per chord (the first chord is always 0.0).
-        """
-        note_times = {}
-        abs_on = {}
-        for t, note, event_type in note_events:
-            if event_type == 'on':
-                abs_on[note] = t
-            elif event_type == 'off' and note in abs_on:
-                note_times.setdefault(note, []).append((abs_on[note], t))
-                del abs_on[note]
-        chord_legato = [0.0] * len(onsets)
-        for i in range(1, len(onsets)):
-            prev_onset, prev_notes = onsets[i-1]
-            curr_onset, _ = onsets[i]
-            overlap_sum = 0.0
-            for note in prev_notes:
-                times = note_times.get(note, [])
-                for on, off in times:
-                    if on <= prev_onset < off:
-                        if off > curr_onset:
-                            overlap = off - curr_onset
-                            overlap_sum += max(0, overlap)
-                        break
-            chord_legato[i] = overlap_sum
-        return chord_legato
-
-    def _detect_reference_legato_per_chord(self, chord_indices):
-        """
-        For each reference chord transition, measure the total time (in ticks) that notes from the previous chord overlap into the next chord.
-        Returns a list of floats (ticks of overlap) per chord (the first chord is always 0.0).
-        """
-        chord_legato = [0.0] * len(chord_indices)
-        prev_onset = None
-        prev_notes = []
-        prev_offsets = {}
-        for i, idx in enumerate(chord_indices):
-            if idx >= len(self.teacher.chord_notes_with_durations):
-                continue
-            chord_notes = self.teacher.chord_notes_with_durations[idx]
-            if not chord_notes:
-                prev_onset = None
-                prev_notes = []
-                prev_offsets = {}
-                continue
-            onset = chord_notes[0][2]
-            notes = [note for note, _hand, _on, _off in chord_notes]
-            offsets = {note: off for note, _hand, _on, off in chord_notes}
-            if prev_onset is not None:
-                overlap_sum = 0.0
-                for note in prev_notes:
-                    off = prev_offsets.get(note, prev_onset)
-                    if off > onset:
-                        overlap = off - onset
-                        overlap_sum += max(0, overlap)
-                chord_legato[i] = overlap_sum
-            prev_onset = onset
-            prev_notes = notes
-            prev_offsets = offsets
-        mid = mido.MidiFile(self.teacher.midi_path)
-        ticks_per_beat = mid.ticks_per_beat
-        tempo = 500000
-        for track in mid.tracks:
-            for msg in track:
-                if msg.type == 'set_tempo':
-                    tempo = msg.tempo
-                    break
-        tick_to_ms = lambda ticks: (ticks * tempo) / (ticks_per_beat * 1000)
-        chord_legato = [tick_to_ms(x) for x in chord_legato]
-        return chord_legato
-
-    def _evaluate(self) -> Score:
-        events = []
-        note_events = []
-        abs_ms = 0
-        for msg in self.recording:
-            abs_ms += getattr(msg, 'time', 0)
-            if msg.type == 'note_on' and getattr(msg, 'velocity', 0) > 0:
-                events.append((abs_ms, msg.note))
-                note_events.append((abs_ms, msg.note, 'on'))
-            elif msg.type == 'note_off' or (msg.type == 'note_on' and getattr(msg, 'velocity', 0) == 0):
-                note_events.append((abs_ms, msg.note, 'off'))
-
-        threshold_ms = 50
-        recorded_onsets = []
-        for t, note in events:
-            if not recorded_onsets or t - recorded_onsets[-1][0] > threshold_ms:
-                recorded_onsets.append([t, {note}])
-            else:
-                recorded_onsets[-1][1].add(note)
-        recorded_onsets = [(o[0], o[1]) for o in recorded_onsets]
-
-        rec_legato_per_chord = self._detect_legato_per_chord(recorded_onsets, note_events)
-
-        if not self.section.chords:
-            self.analytics = {'reason': 'no_chords'}
-            return Score(1.0, 1.0, 1.0, 1.0)
-
-        chord_indices = list(range(self.start_idx, self.end_idx + 1))
-        chord_ticks = []
-        for idx in chord_indices:
-            try:
-                chord_ticks.append(self.teacher.chord_times[idx])
-            except Exception:
-                chord_ticks.append(None)
-
-        ref_legato_per_chord = self._detect_reference_legato_per_chord(chord_indices)
-
-        def tick_to_seconds(tick):
-            if tick is None:
-                return 0.0
-            mid = mido.MidiFile(self.teacher.midi_path)
-            ticks_per_beat = mid.ticks_per_beat
-            tempo_changes = []
-            for track in mid.tracks:
-                abs_tick = 0
-                for msg in track:
-                    abs_tick += msg.time
-                    if msg.type == 'set_tempo':
-                        tempo_changes.append((abs_tick, msg.tempo))
-            tempo_changes.sort()
-            cur_tempo = 500000
-            last_tick = 0
-            seconds = 0.0
-            for tc_tick, tc_tempo in tempo_changes:
-                if tc_tick >= tick:
-                    break
-                delta = tc_tick - last_tick
-                seconds += (delta * cur_tempo) / (ticks_per_beat * 1e6)
-                cur_tempo = tc_tempo
-                last_tick = tc_tick
-            delta = tick - last_tick
-            seconds += (delta * cur_tempo) / (ticks_per_beat * 1e6)
-            return seconds
-
-        ref_abs_secs = [tick_to_seconds(t) for t in chord_ticks]
-        if any(v is None for v in chord_ticks):
-            measure_start_tick = self.teacher.chord_times[self.start_idx] if self.start_idx < len(self.teacher.chord_times) else 0
-            ref_abs_secs = [tick_to_seconds(measure_start_tick + t) for t in self.section.times]
-
-        ref_start = ref_abs_secs[0]
-        ref_onsets_ms = [int((s - ref_start) * 1000.0) for s in ref_abs_secs]
-        ref_chords = [set(n for n, _hand in chord) for chord in self.section.chords]
-
-        if not recorded_onsets:
-            self.analytics = {'reason': 'no_recording'}
-            return Score(0.0, 0.0, 0.0, 0.0)
-
-        n_ref = len(ref_onsets_ms)
-        n_rec = len(recorded_onsets)
-        m = min(n_ref, n_rec)
-
-        acc_scores = []
-        per_chord_issues = []
-        legato_issues = []
-        for i in range(m):
-            ref_set = ref_chords[i]
-            rec_set = recorded_onsets[i][1]
-            if not ref_set and not rec_set:
-                acc_scores.append(1.0)
-                per_chord_issues.append({'missed': set(), 'extra': set(), 'score': 1.0})
-                legato_issues.append(0.0)
-                continue
-
-            rec_legato = rec_legato_per_chord[i] if i < len(rec_legato_per_chord) else 0.0
-            ref_legato = ref_legato_per_chord[i] if i < len(ref_legato_per_chord) else 0.0
-            legato_amount = max(0.0, rec_legato - ref_legato)
-            legato_issues.append(legato_amount)
-
-            inter = len(ref_set & rec_set)
-            denom = (len(ref_set) + len(rec_set))
-            if denom == 0:
-                s = 1.0
-            else:
-                s = (2.0 * inter) / denom
-                if legato_amount > 0 and len(ref_set & rec_set) == len(ref_set):
-                    s = max(s, 0.8)
-            acc_scores.append(s)
-            per_chord_issues.append({'missed': (ref_set - rec_set), 'extra': (rec_set - ref_set), 'score': s, 'legato': legato_amount})
-        if n_rec < n_ref:
-            acc_scores.extend([0.0] * (n_ref - n_rec))
-            for i in range(n_rec, n_ref):
-                per_chord_issues.append({'missed': ref_chords[i], 'extra': set(), 'score': 0.0, 'legato': 0.0})
-                legato_issues.append(0.0)
-
-        accuracy_score = sum(acc_scores) / max(1, n_ref)
-
-        def intervals(xs):
-            return [xs[i + 1] - xs[i] for i in range(len(xs) - 1)] if len(xs) > 1 else []
-
-        ref_intervals = intervals(ref_onsets_ms[:m])
-        rec_intervals = intervals([t for t, _ in recorded_onsets[:m]])
-        interval_diffs = []
-        if not ref_intervals or not rec_intervals:
-            relative_score = 1.0
-        else:
-            mean_ref = sum(ref_intervals) / len(ref_intervals)
-            mean_rec = sum(rec_intervals) / len(rec_intervals)
-            if mean_ref == 0 or mean_rec == 0:
-                relative_score = 0.0
-            else:
-                nref = [ri / mean_ref for ri in ref_intervals]
-                nrec = [ri / mean_rec for ri in rec_intervals]
-                L = min(len(nref), len(nrec))
-                diffs = [abs(nref[i] - nrec[i]) for i in range(L)]
-                avg_diff = sum(diffs) / L
-                relative_score = max(0.0, 1.0 - avg_diff)
-                interval_diffs = [abs(nref[i] - nrec[i]) for i in range(L)]
-
-        ref_total = (ref_onsets_ms[-1] - ref_onsets_ms[0]) if len(ref_onsets_ms) > 1 else 0
-        rec_total = (recorded_onsets[m - 1][0] - recorded_onsets[0][0]) if m > 1 else 0
-        if ref_total == 0:
-            absolute_score = 1.0 if rec_total == 0 else 0.0
-        else:
-            rel_error = abs(rec_total - ref_total) / float(ref_total)
-            absolute_score = max(0.0, 1.0 - min(rel_error, 1.0))
-
-        score = (WEIGHTS['accuracy'] * accuracy_score) + (WEIGHTS['relative'] * relative_score) + (WEIGHTS['absolute'] * absolute_score)
-        score = max(0.0, min(1.0, score))
-
-        worst_idx = None
-        worst_score = 1.0
-        for i, info in enumerate(per_chord_issues):
-            if info['score'] < worst_score:
-                worst_score = info['score']
-                worst_idx = i
-        worst_interval_idx = None
-        worst_interval_diff = 0.0
-        for i, d in enumerate(interval_diffs):
-            if d > worst_interval_diff:
-                worst_interval_diff = d
-                worst_interval_idx = i
-
-        tempo_bias = None
-        if ref_total > 0 and m > 1:
-            tempo_bias = float(rec_total - ref_total) / float(ref_total)
-
-        note_durations = []
-        note_on_times = {}
-        abs_time = 0
-        for msg in self.recording:
-            abs_time += getattr(msg, 'time', 0)
-            if msg.type == 'note_on' and getattr(msg, 'velocity', 0) > 0:
-                note_on_times[msg.note] = abs_time
-            elif (msg.type == 'note_off' or (msg.type == 'note_on' and getattr(msg, 'velocity', 0) == 0)) and msg.note in note_on_times:
-                note_durations.append(abs_time - note_on_times[msg.note])
-                del note_on_times[msg.note]
-        avg_note_length = sum(note_durations) / len(note_durations) if note_durations else 1.0
-        avg_legato_overlap = sum(legato_issues) / len(legato_issues) if legato_issues else 0.0
-        legato_severity = avg_legato_overlap / avg_note_length if avg_note_length > 0 else 0.0
-
-        analytics = {
-            'accuracy': accuracy_score,
-            'per_chord': per_chord_issues,
-            'worst_chord_idx': worst_idx,
-            'worst_chord_score': worst_score,
-            'relative': relative_score,
-            'interval_diffs': interval_diffs,
-            'worst_interval_idx': worst_interval_idx,
-            'worst_interval_diff': worst_interval_diff,
-            'absolute': absolute_score,
-            'tempo_bias': tempo_bias,
-            'n_ref': n_ref,
-            'n_rec': n_rec,
-            'ref_onsets_ms': ref_onsets_ms,
-            'rec_onsets_ms': [t for t, _ in recorded_onsets[:m]],
-            'legato_detected': any(l > 0.05 for l in rec_legato_per_chord),
-            'legato_issues': legato_issues,
-            'legato_severity': legato_severity,
-            'rec_legato_per_chord': rec_legato_per_chord,
-            'ref_legato_per_chord': ref_legato_per_chord,
+        self.weights: dict[str, float] = {
+            "pitch": 0.35,
+            "timing": 0.25,
+            "dynamics": 0.15,
+            "articulation": 0.15,
+            "pedal": 0.10,
         }
 
-        self.analytics = analytics
+        self._evaluation: Optional[PerformanceEvaluation] = None
 
-        return Score(accuracy_score, relative_score, absolute_score, score)
 
-    def _ordinal(self, n: int) -> str:
-        if 10 <= (n % 100) <= 20:
-            suf = 'th'
-        else:
-            suf = {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
-        return f"{n}{suf}"
+    @property
+    def score(self) -> float:
+        if not self._evaluation:
+            self._evaluate()
+        return self._evaluation.overall_score
 
-    def generate_guidance(self, score: Score) -> str:
-        """Generate a short human-friendly guidance message based on the last evaluation analytics.
-        The method prefers the single largest-impact problem (accuracy, relative timing, absolute timing, legato).
-        """
-        if not self.analytics:
-            return "No guidance available."
+    @property
+    def tip(self) -> str:
+        return ""
 
-        legato_severity = self.analytics.get('legato_severity', 0.0)
-        legato_detected = self.analytics.get('legato_detected', False)
+    def _evaluate(self):
+        ref_rh, pedals_rh = _extract_notes_and_pedal(self.reference[0])
+        ref_lh, pedals_lh = _extract_notes_and_pedal(self.reference[1])
+        rec_notes, rec_pedals = _extract_notes_and_pedal(self.recording)
 
-        acc_impact = WEIGHTS['accuracy'] * (1.0 - self.analytics.get('accuracy', 1.0))
-        rel_impact = WEIGHTS['relative'] * (1.0 - self.analytics.get('relative', 1.0))
-        abs_impact = WEIGHTS['absolute'] * (1.0 - self.analytics.get('absolute', 1.0))
-        legato_impact = legato_severity * 0.3
+        ref_all = sorted(ref_rh + ref_lh, key=lambda n: n["onset_ms"])
+        ref_pedals = sorted(pedals_rh + pedals_lh, key=lambda p: p["time_ms"])
 
-        impacts = [('accuracy', acc_impact), ('relative', rel_impact), ('absolute', abs_impact), ('legato', legato_impact)]
-        impacts.sort(key=lambda x: x[1], reverse=True)
-        primary = impacts[0][0]
+        matches, extras = _match_notes(ref_all, rec_notes)
+        evaluation = PerformanceEvaluation(total_notes=len(ref_all))
 
-        worst_chord_idx = self.analytics.get('worst_chord_idx')
-        per_chord = self.analytics.get('per_chord', [])
-        worst_interval_idx = self.analytics.get('worst_interval_idx')
-        tempo_bias = self.analytics.get('tempo_bias')
+        for r, played in matches:
+            if played is None:
+                evaluation.missing_notes += 1
+                evaluation.notes.append(NoteEvaluation(
+                    pitch_correct=False,
+                    time_ms=r["onset_ms"],
+                    comments="Note missing"
+                ))
+                evaluation.issues.append(Issue(
+                    time_ms=r["onset_ms"], severity=1.0,
+                    category="pitch", description=f"Missing note {r['pitch']}"
+                ))
+                continue
 
-        if score.overall == 1.0:
-            return "Machine Perfect! Keep it up! But don't forget to play with feeling."
+            pitch_correct = r["pitch"] == played["pitch"]
+            pitch_error = None if pitch_correct else (played["pitch"] - r["pitch"])
+            onset_dev = played["onset_ms"] - r["onset_ms"]
+            dur_dev = played["duration_ms"] - r["duration_ms"]
+            vel_dev = played["velocity"] - r["velocity"]
 
-        if score.overall >= 0.98:
-            if legato_detected and legato_severity > 0.2 and abs(tempo_bias) < 0.02 and legato_severity > 0.25:
-                return "Almost perfect! Try releasing notes cleanly between chords for better articulation."
-            if tempo_bias is not None and abs(tempo_bias) > 0.02:
-                if tempo_bias > 0:
-                    return "Almost perfect! Now play a little faster overall."
-                else:
-                    return "Almost perfect! Now play a little slower overall."
-            return "Excellent — almost perfect! Keep it up."
+            articulation = _detect_articulation(played["duration_ms"], r["duration_ms"])
 
-        if self.analytics.get('n_rec', 0) == 0:
-            return "I didn't detect any notes. Try playing the section more clearly or check your MIDI input."
+            note_eval = NoteEvaluation(
+                pitch_correct=pitch_correct,
+                pitch_error=pitch_error,
+                onset_deviation_ms=onset_dev,
+                duration_deviation_ms=dur_dev,
+                velocity_deviation=vel_dev,
+                articulation=articulation,
+                time_ms=played["onset_ms"],
+            )
+            evaluation.notes.append(note_eval)
 
-        if primary == 'legato' and legato_detected:
-            if legato_severity > 0.7:
-                return "You're playing too legato (connected) — try releasing notes cleanly between chords for better separation."
-            elif legato_severity > 0.4:
-                return "Some notes are connecting when they should be separate — focus on clean note releases between chords."
+            if not pitch_correct:
+                evaluation.wrong_notes += 1
+                evaluation.issues.append(Issue(
+                    time_ms=played["onset_ms"], note=played["pitch"],
+                    severity=min(abs(pitch_error)/12, 1.0),
+                    category="pitch", description=f"Wrong pitch {played['pitch']} vs {r['pitch']}"
+                ))
             else:
-                return "Work on articulation — make sure notes don't overlap between different chords."
+                evaluation.correct_notes += 1
 
-        if primary == 'accuracy':
-            if legato_detected and legato_severity > 0.35:
-                return "You're playing the right notes but they're connecting too much — focus on clean separation between chords."
-            
-            if worst_chord_idx is None:
-                return "Focus on pressing the right keys."
-            info = per_chord[worst_chord_idx]
-            missed = info.get('missed', set())
-            extra = info.get('extra', set())
-            human_idx = worst_chord_idx + 1
-            if missed and not extra:
-                notes = ','.join(str(n) for n in sorted(missed))
-                return f"Focus on pressing the right keys at the {self._ordinal(human_idx)} chord (you missed: {notes})."
-            if extra and not missed:
-                notes = ','.join(str(n) for n in sorted(extra))
-                if legato_detected:
-                    return f"Release notes cleanly at the {self._ordinal(human_idx)} chord — some notes from previous chords are still sounding."
-                return f"Avoid extra keys at the {self._ordinal(human_idx)} chord (extra: {notes})."
-            if missed and extra:
-                return f"At the {self._ordinal(human_idx)} chord you both missed some notes and played extras — practice that chord slowly."
-            return "Focus on pressing the right keys consistently. Try playing slower and cleanly."
+            if abs(onset_dev) > 30:
+                evaluation.issues.append(Issue(
+                    time_ms=played["onset_ms"], note=played["pitch"],
+                    severity=min(abs(onset_dev)/200, 1.0),
+                    category="timing", description=f"Timing off by {onset_dev:.1f} ms"
+                ))
 
-        if primary == 'relative':
-            if legato_detected and legato_severity > 0.3:
-                return "Your note timing is affected by legato playing — try cleaner note releases for better rhythm."
-            
-            if worst_interval_idx is None:
-                return "Work on keeping consistent spacing between notes. Practice slowly with a metronome."
-            a = worst_interval_idx + 1
-            b = worst_interval_idx + 2
-            ref_onsets = self.analytics.get('ref_onsets_ms', [])
-            rec_onsets = self.analytics.get('rec_onsets_ms', [])
-            if len(ref_onsets) > worst_interval_idx + 1 and len(rec_onsets) > worst_interval_idx + 1:
-                ref_interval = ref_onsets[worst_interval_idx + 1] - ref_onsets[worst_interval_idx]
-                rec_interval = rec_onsets[worst_interval_idx + 1] - rec_onsets[worst_interval_idx]
-                if rec_interval > ref_interval:
-                    return f"Leave more time between the {self._ordinal(a)} and the {self._ordinal(b)} onset — you're stretching that gap."
-                else:
-                    return f"Bring the {self._ordinal(a)} and the {self._ordinal(b)} closer together — you're making that gap too short."
-            return "Work on the timing between consecutive onsets — one gap is noticeably off."
+            if articulation != "normal":
+                evaluation.issues.append(Issue(
+                    time_ms=played["onset_ms"], note=played["pitch"],
+                    severity=0.5,
+                    category="articulation", description=f"Played {articulation}"
+                ))
 
-        if primary == 'absolute':
-            if tempo_bias is None:
-                return "Try matching the overall tempo of the section. Use a metronome."
-            pct = abs(tempo_bias) * 100
-            if tempo_bias > 0:
-                if pct < 5:
-                    return "Almost perfect! Now just play it a little faster overall."
-                return f"Play the whole section faster by about {int(pct)}% to match the target tempo."
-            else:
-                if pct < 5:
-                    return "Almost perfect! Now just play it a little slower overall."
-                return f"Play the whole section slower by about {int(pct)}% to match the target tempo."
+        evaluation.extra_notes = len(extras)
+        for n in extras:
+            evaluation.issues.append(Issue(
+                time_ms=n["onset_ms"], note=n["pitch"],
+                severity=0.5,
+                category="pitch", description=f"Extra note {n['pitch']}"
+            ))
 
-        if legato_detected and legato_severity > 0.2:
-            return "Keep practicing — focus on clean note releases and avoid connecting notes between different chords."
-        
-        return "Keep practicing — try slowing down and focusing on accuracy and steady timing."
+        if evaluation.notes:
+            evaluation.avg_timing_deviation_ms = float(np.mean([abs(n.onset_deviation_ms) for n in evaluation.notes]))
+            evaluation.avg_duration_deviation_ms = float(np.mean([abs(n.duration_deviation_ms) for n in evaluation.notes]))
+            evaluation.avg_velocity_deviation = float(np.mean([abs(n.velocity_deviation) for n in evaluation.notes]))
+
+        deviations = [n.onset_deviation_ms for n in evaluation.notes]
+        if len(deviations) > 1:
+            evaluation.rhythmic_stability = float(np.std(deviations))
+        evaluation.tempo_consistency = 1.0 / (1.0 + evaluation.rhythmic_stability)
+
+        ref_pedal_on = sum(1 for p in ref_pedals if p["value"] >= 64)
+        rec_pedal_on = sum(1 for p in rec_pedals if p["value"] >= 64)
+        evaluation.pedal_accuracy = 1.0 - abs(ref_pedal_on - rec_pedal_on) / max(1, len(ref_pedals))
+
+        if abs(ref_pedal_on - rec_pedal_on) > 0:
+            evaluation.issues.append(Issue(
+                time_ms=0,
+                severity=0.5,
+                category="pedal",
+                description=f"Pedal usage differs (ref {ref_pedal_on}, rec {rec_pedal_on})"
+            ))
+
+        pitch_score = evaluation.correct_notes / max(1, evaluation.total_notes)
+        timing_score = max(0.0, 1.0 - evaluation.avg_timing_deviation_ms / 200.0)
+        dynamics_score = max(0.0, 1.0 - evaluation.avg_velocity_deviation / 40.0)
+        articulation_score = 1.0 - sum(1 for i in evaluation.issues if i.category == "articulation") / max(1, evaluation.total_notes)
+        pedal_score = evaluation.pedal_accuracy
+
+        evaluation.overall_score = (
+            self.weights["pitch"] * pitch_score +
+            self.weights["timing"] * timing_score +
+            self.weights["dynamics"] * dynamics_score +
+            self.weights["articulation"] * articulation_score +
+            self.weights["pedal"] * pedal_score
+        )
+
+        self._evaluation = evaluation
+        pprint(evaluation)

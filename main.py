@@ -40,7 +40,7 @@ synth_enabled = True
 teaching_mode = True
 guided_mode = False
 pressed_notes_set = set()
-pressed_note_events = []
+all_midi_events = []
 
 piano_y_default = PIANO_Y_OFFSET
 piano_y_center = (SCREEN_HEIGHT - WHITE_KEY_HEIGHT - PEDAL_HEIGHT) // 2
@@ -133,12 +133,12 @@ def midi_listener():
     with mido.open_input(port_name) as in_port:
         for msg in in_port:
             print(msg)
+            all_midi_events.append(msg.copy(time=time.time()))
             if msg.type == "note_on" and msg.velocity > 0:
                 pressed_keys[msg.note] = True
                 pressed_fade_keys[msg.note] = pygame.time.get_ticks()
                 pressed_notes_set.add(msg.note)
                 msg.time = time.time()
-                pressed_note_events.append(msg)
                 if teaching_mode:
                     next_notes = midi_teacher.get_next_notes()
                     if msg.note in next_notes:
@@ -155,10 +155,6 @@ def midi_listener():
                 pressed_keys[msg.note] = False
                 pressed_fade_keys.pop(msg.note, None)
                 pressed_notes_set.discard(msg.note)
-                for i, note_event in enumerate(pressed_note_events):
-                    if note_event.note == msg.note:
-                        del pressed_note_events[i]
-                        break
                 if synth_enabled:
                     synth.note_off(msg.note)
             elif msg.type == "control_change":
@@ -175,7 +171,8 @@ running = True
 while running:
     events = pygame.event.get()
     if guided_mode and teaching_mode:
-        guided_teacher.update(pressed_notes_set, pressed_note_events, events)
+        guided_teacher.update(pressed_notes_set, all_midi_events, events)
+    all_midi_events.clear()
     for event in events:
         if event.type == pygame.QUIT or (
             event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
