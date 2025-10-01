@@ -546,4 +546,4 @@ class AnalyticsPopup:
             if not s.file_exists(f"measure_{self._selected_measure}/section_{self._selected_section}/section.json"):
                 raise FileNotFoundError(f"Section {self._selected_section} not found in measure {self._selected_measure}")
             info = json.loads(s.load_file(f"measure_{self._selected_measure}/section_{self._selected_section}/section.json"))["section"]
-            return info["start_idx"], info["end_idx"]
+            return info["start_idx"], info["end_idx"]+1
