@@ -1,8 +1,8 @@
-from collections import defaultdict
+from bisect import bisect_left
 from dataclasses import dataclass
 import mido
-from sheet_music import SheetMusicRenderer
 from save_system import SaveSystem
+from sheet_music import SheetMusicRenderer
 
 @dataclass
 class MeasureData:
@@ -30,6 +30,7 @@ class MidiTeacher:
         self._last_wrapped = False
         self.measures: list[MeasureData] = []
         self._set_measure_data()
+        self._preprocess_track_indices()
 
     def _extract_chords(self):
         events = []
@@ -302,6 +303,19 @@ class MidiTeacher:
             print(f"Failed to load performed notes for measure {measure_index}, section {section}, pass {pass_num}: {e}")
             return []
 
+    def _preprocess_track_indices(self):
+        """Preprocess each track to build a tuple (ticks, msg_list) for fast range queries."""
+        self._track_msg_indices = []
+        for track in self.midi.tracks:
+            abs_tick = 0
+            ticks = []
+            msg_list = []
+            for msg in track:
+                abs_tick += getattr(msg, 'time', 0)
+                ticks.append(abs_tick)
+                msg_list.append(msg)
+            self._track_msg_indices.append((ticks, msg_list))
+
     def get_midi_messages_between_indices(self, start_idx: int, end_idx: int) -> tuple[mido.MidiTrack, mido.MidiTrack]:
         """
         Returns two mido.MidiTrack objects (right_hand_track, left_hand_track) containing all MIDI messages
@@ -310,16 +324,9 @@ class MidiTeacher:
         if not self.chord_times or start_idx >= len(self.chord_times) or end_idx > len(self.chord_times):
             return mido.MidiTrack(), mido.MidiTrack()
         start_tick = self.chord_times[start_idx]
-        if end_idx >= len(self.chord_times):
-            end_tick = self.chord_times[-1] + 1
-        else:
-            end_tick = self.chord_times[end_idx]
-
-        measure_midi_msgs = defaultdict(mido.MidiTrack)
-        for track_index, track in enumerate(self.midi.tracks):
-            abs_tick = 0
-            for msg in track:
-                abs_tick += getattr(msg, 'time', 0)
-                if start_tick <= abs_tick < end_tick and msg.type in ('note_on', 'note_off'):
-                    measure_midi_msgs[track_index].append(msg.copy(time=abs_tick - start_tick))
-        return measure_midi_msgs[0], measure_midi_msgs[1]
+        end_tick = self.chord_times[-1] + 1 if end_idx >= len(self.chord_times) else self.chord_times[end_idx]
+        result_tracks = [mido.MidiTrack(), mido.MidiTrack()]
+        for track_index, track_data in enumerate(getattr(self, '_track_msg_indices', [])):
+            ticks, msg_list = track_data
+            result_tracks[track_index].extend([msg_list[i].copy(time=ticks[i] - start_tick) for i in range(bisect_left(ticks, start_tick), bisect_left(ticks, end_tick))])
+        return result_tracks[0], result_tracks[1]
