@@ -3,7 +3,7 @@ from collections import deque
 from dataclasses import dataclass, asdict
 import mido
 import pygame
-from evaluator import Evaluator
+from evaluator import Evaluator, PerformanceEvaluation
 from midi_teach import MidiTeacher
 from synth import Synth
 from abc import ABC, abstractmethod
@@ -71,6 +71,7 @@ class PracticeSectionTask(Task):
         self.measure = measure
         self.start_idx = section.start_idx
         self.end_idx = section.end_idx
+        self.section_index = next((i for i, sec in enumerate(self.teacher.split_measure_into_sections(self.measure)) if sec.start_idx == self.section.start_idx and sec.end_idx == self.section.end_idx), None)
 
         self.timer_start = None
         self.recording = mido.MidiTrack()
@@ -162,7 +163,7 @@ class PracticeSectionTask(Task):
         guidance_text = evaluator.tip
 
         self.teacher.last_score = score
-        # self._save_pass(evaluator)
+        self._save_pass(evaluator)
         if score > 0.95 and self.teacher.auto_advance:
             self.teacher.synth.play_success_sound()
             self.teacher.next_task()
@@ -171,23 +172,9 @@ class PracticeSectionTask(Task):
             self.teacher.guide_text = guidance_text
 
     def _save_pass(self, evaluator):
-        if isinstance(self, PracticeMeasureTask):
-            section_idx = "measure"
-        elif isinstance(self, PracticeTransitionTask):
-            section_idx = "transition"
-        else:
-            section_idx = next((i for i, sec in enumerate(self.teacher.split_measure_into_sections(self.measure)) if sec.start_idx == self.section.start_idx and sec.end_idx == self.section.end_idx), None)
-        if section_idx is not None:
-            pass_idx = self.teacher.pass_index.get(str(self.measure), {}).get(str(section_idx), 0)
-            analytics = evaluator.analytics.copy()
-            analytics["score"] = {
-                "overall": evaluator.score.overall,
-                "accuracy": evaluator.score.accuracy,
-                "relative_timing": evaluator.score.relative_timing,
-                "absolute_timing": evaluator.score.absolute_timing,
-            }
-            self.teacher.save_pass(self.measure, section_idx, pass_idx, analytics,
-                                   self.recording.copy(), self.section)
+        if self.section_index is not None:
+            self.teacher.save_pass(str(self.measure), str(self.section_index), self.teacher.pass_index.get(str(self.measure), {}).get(str(self.section_index), 0), evaluator.full_evaluation,
+                                   self.recording, self.section)
         else:
             print(f"Could not find section {self.section.start_idx} {self.section.end_idx} in measure {self.measure}")
 
@@ -198,6 +185,7 @@ class PracticeMeasureTask(PracticeSectionTask):
         end_idx = start_idx + len(chords) - 1 if chords else start_idx
         section = MeasureSection(chords, times, xs, start_idx, end_idx)
         super().__init__(teacher, section, measure)
+        super().section_index = "measure"
 
 class PracticeTransitionTask(PracticeSectionTask):
     def __init__(self, teacher, from_measure, to_measure):
@@ -210,6 +198,7 @@ class PracticeTransitionTask(PracticeSectionTask):
         end_idx = to_start_idx + min(1, len(to_chords) - 1) if to_chords else start_idx
         section = MeasureSection(section_chords, section_times, section_xs, start_idx, end_idx)
         super().__init__(teacher, section, from_measure)
+        super().section_index = "transition"
 
     def _handle_pygame_events(self, pygame_events):
         for event in pygame_events:
@@ -469,16 +458,14 @@ class GuidedTeacher:
         self.guide_text = d.get('guide_text', None)
         self.pass_index = d.get('pass_index', {})
 
-    def save_pass(self, measure_idx, section_idx, pass_idx, analytics, recording, section: MeasureSection):
+    def save_pass(self, measure_idx: str, section_idx: str, pass_idx: int, evaluation: PerformanceEvaluation, recording: mido.MidiTrack, section: MeasureSection):
         with self.save_system as s:
             if pass_idx == 0:
                 s.save_file(f"measure_{measure_idx}/section_{section_idx}/section.json", json.dumps({'section': asdict(section), 'timestamp': time.time()}, indent=2, default=str))
-            s.save_file(f"measure_{measure_idx}/section_{section_idx}/pass_{pass_idx}.json", json.dumps({'analytics': analytics, 'timestamp': time.time()}, indent=2, default=str))
+            s.save_file(f"measure_{measure_idx}/section_{section_idx}/pass_{pass_idx}.json", json.dumps({'evaluation': asdict(evaluation), 'timestamp': time.time()}, indent=2, default=str))
             if recording is not None and isinstance(recording, mido.MidiTrack):
                 mid = mido.MidiFile()
                 mid.tracks.append(recording)
                 mid.save(s.get_absolute_path(f"measure_{measure_idx}/section_{section_idx}/pass_{pass_idx}.mid"))
-        measure_key = str(measure_idx)
-        section_key = str(section_idx)
-        self.pass_index[measure_key] = self.pass_index.get(measure_key, {})
-        self.pass_index[measure_key][section_key] = self.pass_index[measure_key].get(section_key, 0) + 1
+        self.pass_index[measure_idx] = self.pass_index.get(measure_idx, {})
+        self.pass_index[measure_idx][section_idx] = self.pass_index[measure_idx].get(section_idx, 0) + 1

@@ -8,6 +8,7 @@ import numpy as np
 import pygame
 from mido import MidiTrack
 
+from evaluator import PerformanceEvaluation
 from flexbox import FlexBox
 from save_system import SaveSystem
 
@@ -23,112 +24,23 @@ def _render_background(surface):
     pygame.draw.rect(surface, (200, 200, 200), (0, 0, surface.get_width(), surface.get_height()), 2, border_radius=16)
 
 
-def _generate_tips(analytics) -> pygame_gui.elements.UITextBox:
-    tips = []
-    technique_tips = []
-
-    if not analytics:
+def _generate_tips(evaluation: PerformanceEvaluation) -> pygame_gui.elements.UITextBox:
+    if not evaluation:
         return pygame_gui.elements.UITextBox(
             html_text='<i>No analytics available.</i>',
             relative_rect=pygame.Rect(0, 0, 100, 10),
         )
 
-    # Existing diagnostic tips
-    if analytics.get('worst_chord_idx') is not None:
-        idx = analytics['worst_chord_idx'] + 1
-        score = analytics['worst_chord_score']
-        tips.append(f'Chord {idx} had the lowest accuracy: {score:.2f}')
+    # TODO: implement for the new evaluator
 
-        # Add technique tip for chord accuracy
-        if score < 0.7:
-            technique_tips.append(f'For chord {idx}: Practice slowly with strong finger independence. Press all notes simultaneously and hold until the sound blends completely.')
-        elif score < 0.9:
-            technique_tips.append(f'For chord {idx}: Focus on even finger pressure and wrist stability. Practice the chord in isolation 10 times before playing in context.')
-
-    if analytics.get('worst_interval_idx') is not None:
-        idx = analytics['worst_interval_idx'] + 1
-        diff = analytics['worst_interval_diff']
-        tips.append(f'Largest timing gap error between onsets {idx} and {idx + 1}: {diff:.2f}')
-
-        # Add technique tip for timing
-        if abs(diff) > 0.1:
-            technique_tips.append(f'Timing technique: Use a metronome and practice counting subdivisions. Try playing with exaggerated staccato first, then gradually connect the notes.')
-        else:
-            technique_tips.append(f'Fine timing: Practice with different rhythmic patterns (dotted, syncopated) to improve internal pulse accuracy.')
-
-    if analytics.get('tempo_bias') is not None:
-        bias = analytics['tempo_bias']
-        if abs(bias) > 0.02:
-            tips.append(f'Overall tempo was {"faster" if bias > 0 else "slower"} by {abs(bias) * 100:.1f}%')
-
-            # Add technique tips for tempo control
-            if bias > 0.05:  # rushing
-                technique_tips.append('Tempo control: Practice with a metronome at 70% target tempo. Focus on feeling the "space" between beats. Try conducting with your free hand.')
-            elif bias < -0.05:  # dragging
-                technique_tips.append('Tempo energy: Imagine the music moving forward. Practice with slight accent on beat 1 of each measure. Keep your body engaged and avoid tension.')
-            else:  # minor tempo issues
-                technique_tips.append('Tempo stability: Record yourself and play back to develop tempo awareness. Practice starting pieces at different tempos without a metronome.')
-
-    if analytics.get('legato_detected'):
-        sev = analytics.get('legato_severity', 0)
-        tips.append(f'Legato severity {sev * 100:.1f}% (lower is better)')
-
-        # Add technique tips for legato
-        if sev > 0.3:
-            technique_tips.append('Legato technique: Practice finger substitution exercises. Connect notes by transferring weight smoothly between fingers while keeping wrist flexible.')
-        elif sev > 0.1:
-            technique_tips.append('Refined legato: Focus on "singing" through your fingers. Practice scales with different finger combinations to improve connection smoothness.')
-
-    # General technique tips based on overall performance
-    accuracy = analytics.get('accuracy', 0)
-    relative_timing = analytics.get('relative', 0)
-    absolute_timing = analytics.get('absolute', 0)
-
-    if accuracy < 0.8:
-        technique_tips.append('Accuracy foundation: Practice hands separately first. Use slow practice (50% tempo) with perfect accuracy before increasing speed.')
-    elif accuracy < 0.95:
-        technique_tips.append('Precision technique: Practice with mental preparation - visualize each note before playing. Use firm, deliberate finger actions.')
-
-    if relative_timing < 0.8:
-        technique_tips.append('Rhythmic precision: Clap the rhythm while singing note names. Practice with different articulations (staccato, legato, accented) to internalize the pattern.')
-    elif relative_timing < 0.95:
-        technique_tips.append('Advanced rhythm: Practice with displaced accents and cross-rhythms to develop rock-solid internal timing.')
-
-    if absolute_timing < 0.8:
-        technique_tips.append('Steady pulse: Practice with a drone or sustained chord. Count aloud while playing. Use body movement (tapping foot, swaying) to internalize the beat.')
-    elif absolute_timing < 0.95:
-        technique_tips.append('Pulse refinement: Practice with polyrhythms (2 against 3, etc.). Record yourself with a metronome and analyze timing deviations.')
-
-    # Score-based encouragement and advanced tips
-    overall_score = analytics.get('score', {}).get('overall', 0) if analytics.get('score') else 0
-
-    if overall_score > 0.95:
-        technique_tips.append('Mastery level: Focus on musical expression. Experiment with subtle tempo variations (rubato) and dynamic shading while maintaining technical precision.')
-    elif overall_score > 0.85:
-        technique_tips.append('Advanced practice: Try practicing in different keys or with altered rhythms. Focus on musical phrasing and breath-like flow between sections.')
-    elif overall_score > 0.7:
-        technique_tips.append('Building consistency: Practice the piece at 80% tempo until you can play it perfectly 3 times in a row before increasing speed.')
-
-    # Mental and physical technique tips
-    if len(tips) > 2:  # If there are multiple issues
-        technique_tips.append('Practice strategy: Break the piece into small sections (2-4 measures). Master each section before combining. Always practice problem spots in isolation.')
-        technique_tips.append('Physical technique: Check your posture and hand position. Tension often causes timing and accuracy issues. Practice relaxation exercises between repetitions.')
-
-    if not tips and not technique_tips:
-        tips = ['No major issues detected.']
-        technique_tips = ['Excellent performance! Focus on musical expression and exploring different interpretations of the piece.']
-
-    # Combine diagnostic and technique tips
-    all_tips = tips + technique_tips
-    list_items = ''.join([f'- {t} <br/>' for t in all_tips])
     return pygame_gui.elements.UITextBox(
-        html_text=f'<b>Performance Analysis & Technique Tips:</b><br/>{list_items}',
+        html_text=f'<b>Performance Analysis & Technique Tips:</b><br/>',
         relative_rect=pygame.Rect(0, 0, 100, 10000),
     )
 
 
-def _render_overall_score(analytics, big_font, flex_box):
-    score_val = analytics.get('score', None).get('overall', None) if analytics and analytics.get('score') else None
+def _render_overall_score(evaluation: PerformanceEvaluation, big_font, flex_box):
+    score_val = evaluation.overall_score if evaluation else None
     if score_val is not None:
         score_text = f"Overall Score: {score_val * 100:.0f}%"
     else:
@@ -145,13 +57,14 @@ def _render_overall_score(analytics, big_font, flex_box):
     )
 
 
-def _matplotlib_spider_chart(analytics, width, height):
-    labels = np.array(['Accuracy', 'Relative', 'Absolute', 'Legato'])
+def _matplotlib_spider_chart(evaluation: PerformanceEvaluation, width, height):
+    labels = np.array(['Accuracy', 'Timing', 'Dynamics', 'Articulation', 'Pedal'])
     values = np.array([
-        analytics.get('accuracy', 0),
-        analytics.get('relative', 0),
-        analytics.get('absolute', 0),
-        1.0 - analytics.get('legato_severity', 0)
+        evaluation.accuracy_score,
+        evaluation.timing_score,
+        evaluation.dynamics_score,
+        evaluation.articulation_score,
+        evaluation.pedal_score,
     ])
     values = np.append(values, values[0])
     angles = np.linspace(0, 2 * np.pi, len(labels), endpoint=False)
@@ -236,7 +149,7 @@ class AnalyticsPopup:
 
         self._last_update_ms = pygame.time.get_ticks()
 
-        self._analytics = None
+        self._evaluation: PerformanceEvaluation | None = None
 
         self._ui_manager.preload_fonts([{'name': 'noto_sans', 'point_size': 14, 'style': 'italic', 'antialiased': '1'}, {'name': 'noto_sans', 'point_size': 14, 'style': 'bold', 'antialiased': '1'}])
 
@@ -264,19 +177,19 @@ class AnalyticsPopup:
                                     align_y="start", direction="vertical")
                 self._main_container.place_element(left_side, width_percent=0.6, height_percent=1)
                 self._render_title(left_side)
-                _render_overall_score(self._analytics, self._big_font, left_side)
+                _render_overall_score(self._evaluation, self._big_font, left_side)
 
-                if self._analytics:
+                if self._evaluation:
                     radar_chart = pygame_gui.elements.UIImage(
                         image_surface=pygame.Surface((100, 100), pygame.SRCALPHA),
                         relative_rect=pygame.Rect(0, 0, 100, 100),
                     )
                     left_side.place_element(radar_chart, width_percent=1, height_percent="max")
                     self._render_pianoroll(left_side)
-                    radar_chart.set_image(_matplotlib_spider_chart(self._analytics, radar_chart.relative_rect[2],
+                    radar_chart.set_image(_matplotlib_spider_chart(self._evaluation, radar_chart.relative_rect[2],
                                                                    radar_chart.relative_rect[3]))
 
-                self._main_container.place_element(_generate_tips(self._analytics), width_percent="max", height_percent=1)
+                self._main_container.place_element(_generate_tips(self._evaluation), width_percent="max", height_percent=1)
 
             now = pygame.time.get_ticks()
             dt = max(0, now - self._last_update_ms) / 1000.0
@@ -297,7 +210,7 @@ class AnalyticsPopup:
         if self._main_container:
             self._main_container.kill()
             self._main_container = None
-        self._analytics = self._get_selected_analytics()
+        self._evaluation = self._get_selected_evaluation()
 
     def handle_event(self, event):
         if not self.visible:
@@ -400,7 +313,7 @@ class AnalyticsPopup:
                     self._selected_section = section
                     self._selected_pass = pass_num
 
-    def _get_selected_analytics(self):
+    def _get_selected_evaluation(self):
         if not (self.pass_map and self.pass_map[self._selected_measure] and self.pass_map[self._selected_measure][
             self._selected_section] and self.pass_map[self._selected_measure][self._selected_section][
                     self._selected_pass]):
@@ -408,8 +321,8 @@ class AnalyticsPopup:
         with self.save_system.guided_teacher_data as s:
             raw = json.loads(
                 s.load_file(self.pass_map[self._selected_measure][self._selected_section][self._selected_pass]))
-            analytics = raw.get('analytics', {})
-            return analytics
+            evaluation = raw.get('evaluation', {})
+            return PerformanceEvaluation(**evaluation) if evaluation else PerformanceEvaluation()
 
     def _get_expected_notes_for_section(self):
         """Get expected notes for the current section."""
