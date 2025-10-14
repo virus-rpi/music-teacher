@@ -185,7 +185,7 @@ class PracticeMeasureTask(PracticeSectionTask):
         end_idx = start_idx + len(chords) - 1 if chords else start_idx
         section = MeasureSection(chords, times, xs, start_idx, end_idx)
         super().__init__(teacher, section, measure)
-        super().section_index = "measure"
+        self.section_index = "measure"
 
 class PracticeTransitionTask(PracticeSectionTask):
     def __init__(self, teacher, from_measure, to_measure):
@@ -198,7 +198,7 @@ class PracticeTransitionTask(PracticeSectionTask):
         end_idx = to_start_idx + min(1, len(to_chords) - 1) if to_chords else start_idx
         section = MeasureSection(section_chords, section_times, section_xs, start_idx, end_idx)
         super().__init__(teacher, section, from_measure)
-        super().section_index = "transition"
+        self.section_index = "transition"
 
     def _handle_pygame_events(self, pygame_events):
         for event in pygame_events:

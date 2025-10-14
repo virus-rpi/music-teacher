@@ -63,7 +63,7 @@ class PerformanceEvaluation:
     pedal_score: float = 0.0
     comments: Optional[str] = None
 
-@dataclass
+@dataclass(frozen=True)
 class Note:
     pitch: int
     onset_ms: int
@@ -111,31 +111,63 @@ def _extract_notes_and_pedal(track: MidiTrack) -> tuple[list[Note], list[PedalEv
     return notes, pedals
 
 
-def _match_notes(ref_notes: list[Note], rec_notes: list[Note]) -> tuple[list[tuple[Note, Note]], list[Note]]:
-    ref_pitches = [n.pitch for n in ref_notes]
-    rec_pitches = [n.pitch for n in rec_notes]
+def _match_notes(ref_notes: list[Note], rec_notes: list[Note]) -> tuple[list[tuple[Note, Optional[Note]]], list[Note]]:
+    """
+    possible alternative algorithm:
+    - continuously strip notes that are the furthest away (distance considering onset and pitch) from the reference and put the striped ones into the extras list.
+    - do that till len(ref_notes) == len(rec_notes)
+    - then normalize them (scale the entire rec_notes tempo to match the reference tempo)
+    - match the rec notes to the closest ref note (distance calculated with onset and pitch)
+    """
 
-    matcher = difflib.SequenceMatcher(a=ref_pitches, b=rec_pitches, autojunk=False)
-    matches: list[tuple[Note, Note | None]] = []
+    def group_by_onset(notes: list[Note]) -> dict[int, list[Note]]:
+        grouped = {}
+        for n in notes:
+            t = round(n.onset_ms / 10) * 10
+            grouped.setdefault(t, []).append(n)
+        return dict(sorted(grouped.items()))
+
+    ref_groups = group_by_onset(ref_notes)
+    rec_groups = group_by_onset(rec_notes)
+
+    ref_times = list(ref_groups.keys())
+    rec_times = list(rec_groups.keys())
+
+    ref_tokens = [",".join(str(n.pitch) for n in sorted(ref_groups[t], key=lambda x: x.pitch)) for t in ref_times]
+    rec_tokens = [",".join(str(n.pitch) for n in sorted(rec_groups[t], key=lambda x: x.pitch)) for t in rec_times]
+
+    matcher = difflib.SequenceMatcher(a=ref_tokens, b=rec_tokens, autojunk=False)
+
+    matches: list[tuple[Note, Optional[Note]]] = []
     extras: list[Note] = []
 
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        if tag == "equal":
-            for k in range(i2 - i1):
-                matches.append((ref_notes[i1 + k], rec_notes[j1 + k]))
-        elif tag == "replace":
+        if tag == "equal" or tag == "replace":
             for k in range(min(i2 - i1, j2 - j1)):
-                matches.append((ref_notes[i1 + k], rec_notes[j1 + k]))
-            for k in range(i1 + (j2 - j1), i2):
-                matches.append((ref_notes[k], None))  # missing
-            for k in range(j1 + (i2 - i1), j2):
-                extras.append(rec_notes[k])  # extra
+                ref_chord = ref_groups[ref_times[i1 + k]]
+                rec_chord = rec_groups[rec_times[j1 + k]]
+
+                used_rec = set()
+                for r in ref_chord:
+                    found = next((rec for rec in rec_chord if rec.pitch == r.pitch and rec not in used_rec), None)
+                    if found:
+                        matches.append((r, found))
+                        used_rec.add(found)
+                    else:
+                        matches.append((r, None)) # TODO: if not found match with the closest note that is not matchable with another ref note
+
+                # leftovers in rec_chord are extras
+                for rec in rec_chord:
+                    if rec not in used_rec:
+                        extras.append(rec)
+
         elif tag == "delete":
             for k in range(i1, i2):
-                matches.append((ref_notes[k], None))
+                for r in ref_groups[ref_times[k]]:
+                    matches.append((r, None))
         elif tag == "insert":
             for k in range(j1, j2):
-                extras.append(rec_notes[k])
+                extras.extend(rec_groups[rec_times[k]])
 
     return matches, extras
 
