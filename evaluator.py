@@ -130,13 +130,12 @@ def _match_notes(ref_notes: list[Note], rec_notes: list[Note]) -> tuple[list[tup
     def note_distance(n1: Note, n2: Note) -> float:
         return (
             abs(n1.onset_ms - n2.onset_ms) / 100.0 +
-            abs(n1.pitch - n2.pitch) +
+            abs(n1.pitch - n2.pitch)*4 +
             abs(n1.duration_ms - n2.duration_ms) / 100.0
         )
     while len(rec_notes_work) > len(ref_notes):
         distances = [min(note_distance(rn, ref) for ref in ref_notes) for rn in rec_notes_work]
-        idx = int(np.argmax(distances))
-        extras.append(rec_notes_work.pop(idx))
+        extras.append(rec_notes_work.pop(int(np.argmax(distances))))
 
     ref_onsets = np.array([n.onset_ms for n in ref_notes])
     rec_onsets = np.array([n.onset_ms for n in rec_notes_work])
@@ -157,24 +156,25 @@ def _match_notes(ref_notes: list[Note], rec_notes: list[Note]) -> tuple[list[tup
             velocity=n.velocity,
             mark=n.mark
         ))
-    ref_used = set()
+    rec_used = set()
     matches = []
-    for rec in rec_notes_norm:
+    for i, ref in enumerate(ref_notes):
         best_idx = None
         best_dist = float('inf')
-        for i, ref in enumerate(ref_notes):
-            if i in ref_used:
+        for j, rec_norm in enumerate(rec_notes_norm):
+            if j in rec_used:
                 continue
-            dist = note_distance(rec, ref)
+            dist = note_distance(ref, rec_norm)
             if dist < best_dist:
                 best_dist = dist
-                best_idx = i
+                best_idx = j
         if best_idx is not None:
-            matches.append((ref_notes[best_idx], rec_notes_work[rec_notes_norm.index(rec)]))
-            ref_used.add(best_idx)
-    for i, ref in enumerate(ref_notes):
-        if i not in ref_used:
+            matches.append((ref, rec_notes_work[best_idx]))
+            rec_used.add(best_idx)
+        else:
             matches.append((ref, None))
+    for i in set(range(len(rec_notes_work))) - rec_used:
+        extras.append(rec_notes_work[i])
     return matches, extras
 
 
@@ -309,8 +309,8 @@ class Evaluator:
         return ""
 
     def _evaluate(self):
-        ref_rh, pedals_rh = _extract_notes_and_pedal(self.reference[0])
-        ref_lh, pedals_lh = _extract_notes_and_pedal(self.reference[1])
+        ref_rh, pedals_rh = _extract_notes_and_pedal(self.reference[0], mark="rh")
+        ref_lh, pedals_lh = _extract_notes_and_pedal(self.reference[1], mark="lh")
         rec_notes, rec_pedals = _extract_notes_and_pedal(self.recording)
 
         ref_all = sorted(ref_rh + ref_lh, key=lambda note: note.onset_ms)
