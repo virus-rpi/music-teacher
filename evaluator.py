@@ -69,6 +69,7 @@ class Note:
     onset_ms: int
     duration_ms: int
     velocity: int
+    mark: Optional[str] = None
 
 @dataclass
 class PedalEvent:
@@ -77,7 +78,7 @@ class PedalEvent:
     pedal_type: pedal_type
 
 
-def _extract_notes_and_pedal(track: MidiTrack) -> tuple[list[Note], list[PedalEvent]]:
+def _extract_notes_and_pedal(track: MidiTrack, mark: Optional[str]=None) -> tuple[list[Note], list[PedalEvent]]:
     """
     Extract notes and pedal events (CC64).
     """
@@ -99,7 +100,8 @@ def _extract_notes_and_pedal(track: MidiTrack) -> tuple[list[Note], list[PedalEv
                 pitch=msg.note,
                 onset_ms=start_time,
                 duration_ms=duration,
-                velocity=velocity
+                velocity=velocity,
+                mark=mark
             ))
         elif msg.type == "control_change" and msg.control in pedal_types:
             pedals.append(PedalEvent(
@@ -113,62 +115,66 @@ def _extract_notes_and_pedal(track: MidiTrack) -> tuple[list[Note], list[PedalEv
 
 def _match_notes(ref_notes: list[Note], rec_notes: list[Note]) -> tuple[list[tuple[Note, Optional[Note]]], list[Note]]:
     """
-    possible alternative algorithm:
-    - continuously strip notes that are the furthest away (distance considering onset and pitch) from the reference and put the striped ones into the extras list.
-    - do that till len(ref_notes) == len(rec_notes)
-    - then normalize them (scale the entire rec_notes tempo to match the reference tempo)
-    - match the rec notes to the closest ref note (distance calculated with onset and pitch)
+    Alternative algorithm:
+    1. Strip the furthest notes (by onset/pitch/duration distance) from rec_notes until len(rec_notes) == len(ref_notes), collecting extras.
+    2. Normalize rec_notes tempo to match ref_notes (scale onset/duration).
+    3. Match each rec_note to the closest ref_note (using a distance metric combining onset, pitch, and duration).
+    4. Return the matches and extras.
     """
+    if not ref_notes:
+        return [], rec_notes.copy()
+    if not rec_notes:
+        return [(r, None) for r in ref_notes], []
+    rec_notes_work = rec_notes.copy()
+    extras = []
+    def note_distance(n1: Note, n2: Note) -> float:
+        return (
+            abs(n1.onset_ms - n2.onset_ms) / 100.0 +
+            abs(n1.pitch - n2.pitch) +
+            abs(n1.duration_ms - n2.duration_ms) / 100.0
+        )
+    while len(rec_notes_work) > len(ref_notes):
+        distances = [min(note_distance(rn, ref) for ref in ref_notes) for rn in rec_notes_work]
+        idx = int(np.argmax(distances))
+        extras.append(rec_notes_work.pop(idx))
 
-    def group_by_onset(notes: list[Note]) -> dict[int, list[Note]]:
-        grouped = {}
-        for n in notes:
-            t = round(n.onset_ms / 10) * 10
-            grouped.setdefault(t, []).append(n)
-        return dict(sorted(grouped.items()))
-
-    ref_groups = group_by_onset(ref_notes)
-    rec_groups = group_by_onset(rec_notes)
-
-    ref_times = list(ref_groups.keys())
-    rec_times = list(rec_groups.keys())
-
-    ref_tokens = [",".join(str(n.pitch) for n in sorted(ref_groups[t], key=lambda x: x.pitch)) for t in ref_times]
-    rec_tokens = [",".join(str(n.pitch) for n in sorted(rec_groups[t], key=lambda x: x.pitch)) for t in rec_times]
-
-    matcher = difflib.SequenceMatcher(a=ref_tokens, b=rec_tokens, autojunk=False)
-
-    matches: list[tuple[Note, Optional[Note]]] = []
-    extras: list[Note] = []
-
-    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        if tag == "equal" or tag == "replace":
-            for k in range(min(i2 - i1, j2 - j1)):
-                ref_chord = ref_groups[ref_times[i1 + k]]
-                rec_chord = rec_groups[rec_times[j1 + k]]
-
-                used_rec = set()
-                for r in ref_chord:
-                    found = next((rec for rec in rec_chord if rec.pitch == r.pitch and rec not in used_rec), None)
-                    if found:
-                        matches.append((r, found))
-                        used_rec.add(found)
-                    else:
-                        matches.append((r, None)) # TODO: if not found match with the closest note that is not matchable with another ref note
-
-                # leftovers in rec_chord are extras
-                for rec in rec_chord:
-                    if rec not in used_rec:
-                        extras.append(rec)
-
-        elif tag == "delete":
-            for k in range(i1, i2):
-                for r in ref_groups[ref_times[k]]:
-                    matches.append((r, None))
-        elif tag == "insert":
-            for k in range(j1, j2):
-                extras.extend(rec_groups[rec_times[k]])
-
+    ref_onsets = np.array([n.onset_ms for n in ref_notes])
+    rec_onsets = np.array([n.onset_ms for n in rec_notes_work])
+    if len(ref_onsets) > 1 and len(rec_onsets) > 1:
+        ref_span = ref_onsets[-1] - ref_onsets[0]
+        rec_span = rec_onsets[-1] - rec_onsets[0]
+        scale = (ref_span / rec_span) if rec_span > 0 else 1.0
+    else:
+        scale = 1.0
+    rec_notes_norm = []
+    for n in rec_notes_work:
+        onset = int(ref_onsets[0] + (n.onset_ms - rec_onsets[0]) * scale)
+        duration = int(n.duration_ms * scale)
+        rec_notes_norm.append(Note(
+            pitch=n.pitch,
+            onset_ms=onset,
+            duration_ms=duration,
+            velocity=n.velocity,
+            mark=n.mark
+        ))
+    ref_used = set()
+    matches = []
+    for rec in rec_notes_norm:
+        best_idx = None
+        best_dist = float('inf')
+        for i, ref in enumerate(ref_notes):
+            if i in ref_used:
+                continue
+            dist = note_distance(rec, ref)
+            if dist < best_dist:
+                best_dist = dist
+                best_idx = i
+        if best_idx is not None:
+            matches.append((ref_notes[best_idx], rec_notes_work[rec_notes_norm.index(rec)]))
+            ref_used.add(best_idx)
+    for i, ref in enumerate(ref_notes):
+        if i not in ref_used:
+            matches.append((ref, None))
     return matches, extras
 
 
