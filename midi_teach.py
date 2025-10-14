@@ -392,6 +392,5 @@ class MidiTeacher:
         for track_index, track_data in enumerate(getattr(self, '_track_msg_indices', [])):
             times_ms, msg_list = track_data
             result_tracks[track_index].extend([msg_list[i].copy() for i in range(bisect_left(times_ms, start_time), bisect_left(times_ms, end_time))])
-            if len(result_tracks[track_index]) > 0:
-                result_tracks[track_index][0].time = 0
+            if len(result_tracks[track_index]) > 0: result_tracks[track_index][0].time = times_ms[bisect_left(times_ms, start_time)] - start_time
         return result_tracks[0], result_tracks[1]
