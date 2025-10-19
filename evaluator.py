@@ -307,9 +307,9 @@ def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
 
     if ev.accuracy_score < 0.85:
         wrong_notes = [i for i in ev.issues if i.category == "accuracy"]
-        locations = [f"{i.time_ms/1000:.2f}s" for i in wrong_notes[:3]]
+        locations = [f"index {idx}" for idx, i in enumerate(wrong_notes[:3])]
         if locations:
-            loc_str = " around " + ", ".join(locations)
+            loc_str = " at " + ", ".join(locations)
         else:
             loc_str = ""
         msg = f"You missed quite a few notes{loc_str} ({ev.wrong_notes + ev.missing_notes} total). Focus on accuracy first."
@@ -319,9 +319,9 @@ def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
 
     if ev.extra_notes > 0:
         extra_notes = [i for i in ev.issues if i.category == "accuracy" and i.severity < 1.0]
-        locations = [f"{i.time_ms/1000:.2f}s" for i in extra_notes[:3]]
+        locations = [f"index {idx}" for idx, i in enumerate(extra_notes[:3])]
         if locations:
-            loc_str = " around " + ", ".join(locations)
+            loc_str = " at " + ", ".join(locations)
         else:
             loc_str = ""
         msg = f"You are adding {ev.extra_notes} unnecessary notes{loc_str}. Be careful not to press extra keys."
@@ -329,9 +329,9 @@ def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
 
     if ev.missing_notes > 0:
         missing_notes = [i for i in ev.issues if i.category == "accuracy" and i.severity == 1.0]
-        locations = [f"{i.time_ms/1000:.2f}s" for i in missing_notes[:3]]
+        locations = [f"index {idx}" for idx, i in enumerate(missing_notes[:3])]
         if locations:
-            loc_str = " around " + ", ".join(locations)
+            loc_str = " at " + ", ".join(locations)
         else:
             loc_str = ""
         msg = f"You are missing {ev.missing_notes} notes{loc_str}. Be careful not to miss any keys."
@@ -339,9 +339,9 @@ def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
 
     if ev.timing_score < 0.8:
         timing_issues = [i for i in ev.issues if i.category == "timing"]
-        locations = [f"{i.time_ms/1000:.2f}s" for i in timing_issues[:3]]
+        locations = [f"index {idx}" for idx, i in enumerate(timing_issues[:3])]
         if locations:
-            loc_str = " around " + ", ".join(locations)
+            loc_str = " at " + ", ".join(locations)
         else:
             loc_str = ""
         msg = f"Your timing is off{loc_str} (average deviation {ev.avg_timing_deviation_ms/1000:.2f} s). Practice with a metronome."
@@ -353,9 +353,9 @@ def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
 
     if ev.dynamics_score < 0.85:
         dynamic_issues = [n for n in ev.notes if abs(n.velocity_deviation) > 10]
-        locations = [f"{n.time_ms/1000:.2f}s" for n in dynamic_issues[:3]]
+        locations = [f"index {idx}" for idx, n in enumerate(dynamic_issues[:3])]
         if locations:
-            loc_str = " around " + ", ".join(locations)
+            loc_str = " at " + ", ".join(locations)
         else:
             loc_str = ""
         msg = f"Your dynamics are uneven{loc_str}. Try to control volume more consistently."
@@ -377,9 +377,9 @@ def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
         tips.append(("To reach perfection, refine your articulation to match the reference.", 0.5 * ((num_staccato + num_legato) / len(ev.notes)) * weights.get("articulation", 1.0)))
 
     if articulation_issues:
-        locations = [f"{n.time_ms/1000:.2f}s" for n in articulation_issues[:3]]
+        locations = [f"index {idx}" for idx, n in enumerate(articulation_issues[:3])]
         if locations:
-            loc_str = " around " + ", ".join(locations)
+            loc_str = " at " + ", ".join(locations)
         else:
             loc_str = ""
         msg = f"Refine articulation to match the reference{loc_str}."
@@ -387,9 +387,9 @@ def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
 
     if ev.pedal_score < 0.8:
         pedal_issues = [i for i in ev.issues if i.category == "pedal"]
-        locations = [f"{i.time_ms/1000:.2f}s" for i in pedal_issues[:3]]
+        locations = [f"index {idx}" for idx, i in enumerate(pedal_issues[:3])]
         if locations:
-            loc_str = " around " + ", ".join(locations)
+            loc_str = " at " + ", ".join(locations)
         else:
             loc_str = ""
         msg = f"Your pedal usage needs improvement{loc_str}. Listen carefully to the pedal changes in the reference."
