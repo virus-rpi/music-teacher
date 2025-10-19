@@ -291,15 +291,18 @@ def _pitch_to_name(pitch: int) -> str:
     return f"{name}{octave}"
 
 
-def _generate_tips(ev: PerformanceEvaluation) -> list[str]:
+def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
     tips = []
 
     if ev.tempo_deviation_ratio < 0.9:
-        tips.append((f"You are playing too slow. Try increasing your tempo a bit!", (1.0 - ev.tempo_deviation_ratio) * weights.get("tempo", 1.0)))
+        percent = (1.0 - ev.tempo_deviation_ratio) * 100
+        tips.append((f"You are playing too slow ({percent:.1f}% slower than reference). Try increasing your tempo a bit!", (1.0 - ev.tempo_deviation_ratio) * weights.get("tempo", 1.0)))
     elif ev.tempo_deviation_ratio > 1.1:
-        tips.append((f"You are playing too fast. Slow down slightly to match the reference.", (ev.tempo_deviation_ratio - 1.0) * weights.get("tempo", 1.0)))
+        percent = (ev.tempo_deviation_ratio - 1.0) * 100
+        tips.append((f"You are playing too fast ({percent:.1f}% faster than reference). Slow down slightly to match the reference.", (ev.tempo_deviation_ratio - 1.0) * weights.get("tempo", 1.0)))
     elif abs(ev.tempo_deviation_ratio - 1.0) > 0.01:
-        tips.append((f"Adjust your tempo slightly to match the reference to reach perfection.", abs(ev.tempo_deviation_ratio - 1.0) * weights.get("tempo", 1.0)))
+        percent = (ev.tempo_deviation_ratio - 1.0) * 100
+        tips.append((f"Adjust your tempo slightly to match the reference (off by {percent:.1f}%).", abs(ev.tempo_deviation_ratio - 1.0) * weights.get("tempo", 1.0)))
 
     if ev.accuracy_score < 0.85:
         wrong_notes = [i for i in ev.issues if i.category == "accuracy"]
@@ -395,10 +398,11 @@ def _generate_tips(ev: PerformanceEvaluation) -> list[str]:
 
     rh_issues = ev.hand_summary.get("rh", HandIssueSummary())
     lh_issues = ev.hand_summary.get("lh", HandIssueSummary())
-    if rh_issues.total_issues > lh_issues.total_issues * 1.5:
-        tips.append(("Your right hand seems to have more mistakes. Focus on right-hand passages.", 0.6))
-    elif lh_issues.total_issues > rh_issues.total_issues * 1.5:
-        tips.append(("Your left hand seems to struggle more. Slow down left-hand parts for clarity.", 0.6))
+    if rh_issues.total_issues > 0 and lh_issues.total_issues > 0:
+        if rh_issues.total_issues > lh_issues.total_issues * 1.5:
+            tips.append(("Your right hand seems to have more mistakes. Focus on right-hand passages.", 0.6))
+        elif lh_issues.total_issues > rh_issues.total_issues * 1.5:
+            tips.append(("Your left hand seems to struggle more. Slow down left-hand parts for clarity.", 0.6))
 
     if ev.overall_score == 1.0:
         encouragement = "Perfect performance! You don't need this anymore. Just practice on your own and bring in your emotions."
@@ -412,9 +416,7 @@ def _generate_tips(ev: PerformanceEvaluation) -> list[str]:
         encouragement = "Keep practicing! "
 
     tips_sorted = [t for t, _ in sorted(tips, key=lambda x: x[1], reverse=True)]
-    if encouragement:
-        return [encouragement + tip for tip in tips_sorted] if tips_sorted else [encouragement.strip()]
-    return tips_sorted
+    return tips_sorted, encouragement
 
 
 class Evaluator:
@@ -436,9 +438,10 @@ class Evaluator:
     @property
     def tip(self) -> str:
         evaluation = self.full_evaluation
+        encouragement = ""
         if not evaluation.comments:
-            evaluation.comments = _generate_tips(evaluation)
-        return evaluation.comments[0] if evaluation.comments else "No major issues detected. Great job!"
+            evaluation.comments, encouragement = _generate_tips(evaluation)
+        return encouragement + str(evaluation.comments[0]) if evaluation.comments else encouragement.strip() or "Perfect performance!"
 
     def _evaluate(self):
         ref_rh, pedals_rh = _extract_notes_and_pedal(self.reference[0], mark="rh")

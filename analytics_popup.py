@@ -25,16 +25,18 @@ def _render_background(surface):
 
 
 def _generate_tips(evaluation: PerformanceEvaluation) -> pygame_gui.elements.UITextBox:
-    if not evaluation:
+    if not evaluation or not evaluation.comments:
         return pygame_gui.elements.UITextBox(
             html_text='<i>No analytics available.</i>',
             relative_rect=pygame.Rect(0, 0, 100, 10),
         )
 
-    # TODO: implement for the new evaluator
+    tips_html = '<b>Performance Analysis & Technique Tips:</b><br/>'
+    for comment in evaluation.comments:
+        tips_html += f'{comment}\n'
 
     return pygame_gui.elements.UITextBox(
-        html_text=f'<b>Performance Analysis & Technique Tips:</b><br/>',
+        html_text=tips_html,
         relative_rect=pygame.Rect(0, 0, 100, 10000),
     )
 
@@ -471,3 +473,4 @@ class AnalyticsPopup:
                 raise FileNotFoundError(f"Section {self._selected_section} not found in measure {self._selected_measure}")
             info = json.loads(s.load_file(f"measure_{self._selected_measure}/section_{self._selected_section}/section.json"))["section"]
             return info["start_idx"], info["end_idx"]+1
+
