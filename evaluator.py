@@ -401,9 +401,9 @@ def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
     lh_issues = ev.hand_summary.get("lh", HandIssueSummary())
     if rh_issues.total_issues > 0 and lh_issues.total_issues > 0:
         if rh_issues.total_issues > lh_issues.total_issues * 1.5:
-            tips.append(("Your right hand seems to have more mistakes. Focus on right-hand passages.", 0.6))
+            tips.append(("Your right hand seems to have more mistakes. Focus on right-hand passages.", 0))
         elif lh_issues.total_issues > rh_issues.total_issues * 1.5:
-            tips.append(("Your left hand seems to struggle more. Slow down left-hand parts for clarity.", 0.6))
+            tips.append(("Your left hand seems to struggle more. Slow down left-hand parts for clarity.", 0))
 
     if ev.overall_score == 1.0:
         encouragement = "Perfect performance! You don't need this anymore. Just practice on your own and bring in your emotions."

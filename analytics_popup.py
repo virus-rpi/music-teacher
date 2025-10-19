@@ -35,6 +35,8 @@ def _generate_tips(evaluation: PerformanceEvaluation) -> pygame_gui.elements.UIT
     for comment in evaluation.comments:
         tips_html += f'{comment}\n'
 
+    # TODO: add concrete techniques
+
     return pygame_gui.elements.UITextBox(
         html_text=tips_html,
         relative_rect=pygame.Rect(0, 0, 100, 10000),
