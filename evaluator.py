@@ -294,15 +294,15 @@ def _pitch_to_name(pitch: int) -> str:
 def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
     tips = []
 
-    if ev.tempo_deviation_ratio < 0.9:
+    if ev.tempo_deviation_ratio < 0.95:
         percent = (1.0 - ev.tempo_deviation_ratio) * 100
-        tips.append((f"You are playing too slow ({percent:.1f}% slower than reference). Try increasing your tempo a bit!", (1.0 - ev.tempo_deviation_ratio) * weights.get("tempo", 1.0)))
-    elif ev.tempo_deviation_ratio > 1.1:
+        tips.append((f"You are playing too slow ({percent:.1f}% slower than reference). Try increasing your tempo a bit!", (1.0 - ev.tempo_deviation_ratio) * weights.get("tempo", 1.0) * 1.2))
+    elif ev.tempo_deviation_ratio > 1.05:
         percent = (ev.tempo_deviation_ratio - 1.0) * 100
-        tips.append((f"You are playing too fast ({percent:.1f}% faster than reference). Slow down slightly to match the reference.", (ev.tempo_deviation_ratio - 1.0) * weights.get("tempo", 1.0)))
+        tips.append((f"You are playing too fast ({percent:.1f}% faster than reference). Slow down slightly to match the reference.", (ev.tempo_deviation_ratio - 1.0) * weights.get("tempo", 1.0) * 1.2))
     elif abs(ev.tempo_deviation_ratio - 1.0) > 0.01:
         percent = (ev.tempo_deviation_ratio - 1.0) * 100
-        tips.append((f"Adjust your tempo slightly to match the reference (off by {percent:.1f}%).", abs(ev.tempo_deviation_ratio - 1.0) * weights.get("tempo", 1.0)))
+        tips.append((f"Adjust your tempo slightly to match the reference (off by {percent:.1f}%).", abs(ev.tempo_deviation_ratio - 1.0) * weights.get("tempo", 1.0) * 1.2))
 
     if ev.accuracy_score < 0.85:
         wrong_notes = [i for i in ev.issues if i.category == "accuracy"]
@@ -314,7 +314,7 @@ def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
         msg = f"You missed quite a few notes{loc_str} ({ev.wrong_notes + ev.missing_notes} total). Focus on accuracy first."
         tips.append((msg, (1.0 - ev.accuracy_score) * weights.get("accuracy", 1.0)))
     elif ev.accuracy_score < 1.0:
-        tips.append(("To reach perfection, double-check each note for accuracy.",  (1.0 - ev.accuracy_score) * weights.get("accuracy", 1.0)))
+        tips.append(("To reach perfection, double-check each note for accuracy.", 0.5 * (1.0 - ev.accuracy_score) * weights.get("accuracy", 1.0)))
 
     if ev.extra_notes > 0:
         extra_notes = [i for i in ev.issues if i.category == "accuracy" and i.severity < 1.0]
@@ -348,7 +348,7 @@ def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
     elif ev.rhythmic_stability > 50:
         tips.append((f"Your rhythm fluctuates (stability {ev.rhythmic_stability:.1f}). Try keeping a steadier beat.", min(ev.rhythmic_stability / 200, 1.0) * weights.get("timing", 1.0)))
     elif ev.timing_score < 1.0:
-        tips.append(("To reach perfection, refine your microtiming for each note.", (1.0 - ev.timing_score) * weights.get("timing", 1.0)))
+        tips.append(("To reach perfection, refine your microtiming for each note.", 0.5 * (1.0 - ev.timing_score) * weights.get("timing", 1.0)))
 
     if ev.dynamics_score < 0.85:
         dynamic_issues = [n for n in ev.notes if abs(n.velocity_deviation) > 10]
@@ -360,7 +360,7 @@ def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
         msg = f"Your dynamics are uneven{loc_str}. Try to control volume more consistently."
         tips.append((msg, (1.0 - ev.dynamics_score) * weights.get("dynamics", 1.0)))
     elif ev.dynamics_score < 1.0:
-        tips.append(("To reach perfection, make your dynamics perfectly balanced.", (1.0 - ev.dynamics_score) * weights.get("dynamics", 1.0)))
+        tips.append(("To reach perfection, make your dynamics perfectly balanced.", 0.5 * (1.0 - ev.dynamics_score) * weights.get("dynamics", 1.0)))
 
     num_staccato = sum(1 for n in ev.notes if n.articulation == "staccato")
     num_legato = sum(1 for n in ev.notes if n.articulation == "legato")
@@ -373,7 +373,7 @@ def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
         tips.append(("You are playing too legato. Try separating the notes a bit more.",
                      (num_legato / len(ev.notes)) * weights.get("articulation", 1.0)))
     elif num_staccato + num_legato > 0:
-        tips.append(("To reach perfection, refine your articulation to match the reference.", ((num_staccato + num_legato) / len(ev.notes)) * weights.get("articulation", 1.0)))
+        tips.append(("To reach perfection, refine your articulation to match the reference.", 0.5 * ((num_staccato + num_legato) / len(ev.notes)) * weights.get("articulation", 1.0)))
 
     if articulation_issues:
         locations = [f"{n.time_ms/1000:.2f}s" for n in articulation_issues[:3]]
@@ -394,7 +394,7 @@ def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
         msg = f"Your pedal usage needs improvement{loc_str}. Listen carefully to the pedal changes in the reference."
         tips.append((msg, (1.0 - ev.pedal_score) * weights.get("pedal", 1.0)))
     elif ev.pedal_score < 1.0:
-        tips.append(("To reach perfection, perfect your pedal timing and depth.", (1.0 - ev.pedal_score) * weights.get("pedal", 1.0)))
+        tips.append(("To reach perfection, perfect your pedal timing and depth.", 0.5 * (1.0 - ev.pedal_score) * weights.get("pedal", 1.0)))
 
     rh_issues = ev.hand_summary.get("rh", HandIssueSummary())
     lh_issues = ev.hand_summary.get("lh", HandIssueSummary())
