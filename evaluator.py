@@ -32,6 +32,12 @@ class Issue:
     category: issue_category = ""
     description: str = ""
 
+@dataclass
+class HandIssueSummary:
+    total_issues: int = 0
+    by_category: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    avg_severity: float = 0.0
+
 
 @dataclass
 class PerformanceEvaluation:
@@ -55,6 +61,11 @@ class PerformanceEvaluation:
     phrasing_similarity: float = 0.0
     hand_independence: float = 0.0
     chord_accuracy: float = 0.0
+
+    tempo_deviation_ratio: float = 1.0
+    tempo_accuracy_score: float = 1.0
+
+    hand_summary: dict[str, HandIssueSummary] = field(default_factory=dict)
 
     overall_score: float = 0.0
     accuracy_score: float = 0.0
@@ -276,12 +287,13 @@ class Evaluator:
         self.recording: MidiTrack = recording
         self.reference: tuple[MidiTrack, MidiTrack] = reference
 
-        self.weights: dict[issue_category, float] = {
-            "accuracy": 0.35,
-            "timing": 0.25,
+        self.weights: dict[issue_category | str, float] = {
+            "accuracy": 0.30,
+            "timing": 0.20,
             "dynamics": 0.15,
             "articulation": 0.15,
             "pedal": 0.10,
+            "tempo": 0.10,
         }
 
         self._evaluation: Optional[PerformanceEvaluation] = None
@@ -310,8 +322,16 @@ class Evaluator:
 
         matches, extras, tempo_ratio = _match_notes(ref_all, rec_notes)
         evaluation = PerformanceEvaluation(total_notes=len(ref_all))
+        evaluation.tempo_deviation_ratio = tempo_ratio
+
+        tempo_dev = abs(1.0 - tempo_ratio)
+        evaluation.tempo_accuracy_score = max(0.0, 1.0 - tempo_dev)
+
+        hand_stats = {"rh": HandIssueSummary(), "lh": HandIssueSummary(), "unknown": HandIssueSummary()}
 
         for r, played in matches:
+            hand = r.mark or "unknown"
+
             if played is None:
                 evaluation.missing_notes += 1
                 evaluation.notes.append(NoteEvaluation(
@@ -319,19 +339,21 @@ class Evaluator:
                     time_ms=r.onset_ms,
                     comments="Note missing"
                 ))
-                evaluation.issues.append(Issue(
+                issue = Issue(
                     time_ms=r.onset_ms, severity=1.0,
                     category="accuracy", description=f"Missing note {_pitch_to_name(r.pitch)}"
-                ))
+                )
+                evaluation.issues.append(issue)
+                hand_stats[hand].total_issues += 1
+                hand_stats[hand].by_category["accuracy"] += 1
                 continue
 
             pitch_correct = r.pitch == played.pitch
             pitch_error = None if pitch_correct else (played.pitch - r.pitch)
             onset_dev = played.onset_ms - r.onset_ms
-            dur_dev = played.duration_ms - r.duration_ms
+            dur_dev = (played.duration_ms / (tempo_ratio + 1e-6)) - r.duration_ms  # adjust for tempo!
             vel_dev = played.velocity - r.velocity
-
-            articulation = _detect_articulation(played.duration_ms, r.duration_ms)
+            articulation = _detect_articulation(played.duration_ms / tempo_ratio, r.duration_ms)
 
             note_eval = NoteEvaluation(
                 pitch_correct=pitch_correct,
@@ -345,35 +367,44 @@ class Evaluator:
             evaluation.notes.append(note_eval)
 
             if not pitch_correct:
-                evaluation.wrong_notes += 1
-                evaluation.issues.append(Issue(
+                issue = Issue(
                     time_ms=played.onset_ms, note=played.pitch,
                     severity=min(abs(pitch_error)/12, 1.0),
                     category="accuracy", description=f"Wrong pitch {_pitch_to_name(played.pitch)} vs {_pitch_to_name(r.pitch)}"
-                ))
+                )
+                evaluation.issues.append(issue)
+                evaluation.wrong_notes += 1
+                hand_stats[hand].total_issues += 1
+                hand_stats[hand].by_category["accuracy"] += 1
             else:
                 evaluation.correct_notes += 1
 
             if abs(onset_dev) > 30:
-                evaluation.issues.append(Issue(
+                issue = Issue(
                     time_ms=played.onset_ms, note=played.pitch,
                     severity=min(abs(onset_dev)/200, 1.0),
                     category="timing", description=f"Timing off by {onset_dev:.1f} ms"
-                ))
+                )
+                evaluation.issues.append(issue)
+                hand_stats[hand].total_issues += 1
+                hand_stats[hand].by_category["timing"] += 1
 
             if articulation != "normal":
-                evaluation.issues.append(Issue(
+                issue = Issue(
                     time_ms=played.onset_ms, note=played.pitch,
-                    severity=0.5,
-                    category="articulation", description=f"Played {articulation}"
-                ))
+                    severity=0.5, category="articulation",
+                    description=f"Played {articulation}"
+                )
+                evaluation.issues.append(issue)
+                hand_stats[hand].total_issues += 1
+                hand_stats[hand].by_category["articulation"] += 1
 
         evaluation.extra_notes = len(extras)
         for n in extras:
             evaluation.issues.append(Issue(
                 time_ms=n.onset_ms, note=n.pitch,
-                severity=0.5,
-                category="accuracy", description=f"Extra note {n.pitch}"
+                severity=0.5, category="accuracy",
+                description=f"Extra note {n.pitch}"
             ))
 
         if evaluation.notes:
@@ -382,8 +413,7 @@ class Evaluator:
             evaluation.avg_velocity_deviation = float(np.mean([abs(n.velocity_deviation) for n in evaluation.notes]))
 
         deviations = [n.onset_deviation_ms for n in evaluation.notes]
-        if len(deviations) > 1:
-            evaluation.rhythmic_stability = float(np.std(deviations))
+        evaluation.rhythmic_stability = float(np.std(deviations)) if len(deviations) > 1 else 0.0
         evaluation.tempo_consistency = 1.0 / (1.0 + evaluation.rhythmic_stability)
 
         _evaluate_pedal_use(ref_pedals, rec_pedals, evaluation)
@@ -398,8 +428,18 @@ class Evaluator:
             self.weights["timing"] * evaluation.timing_score +
             self.weights["dynamics"] * evaluation.dynamics_score +
             self.weights["articulation"] * evaluation.articulation_score +
-            self.weights["pedal"] * evaluation.pedal_score
+            self.weights["pedal"] * evaluation.pedal_score +
+            self.weights["tempo"] * evaluation.tempo_accuracy_score
         )
+
+        for hand, summary in hand_stats.items():
+            if summary.total_issues:
+                severities = [i.severity for i in evaluation.issues if (hand == "unknown" or any(
+                    (r.mark == hand and (r.pitch == i.note or abs(r.onset_ms - i.time_ms) < 50))
+                    for r, _ in matches))]
+                summary.avg_severity = float(np.mean(severities)) if severities else 0.0
+
+        evaluation.hand_summary = hand_stats
 
         self._evaluation = evaluation
         pprint(evaluation)

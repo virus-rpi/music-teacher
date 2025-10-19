@@ -58,13 +58,14 @@ def _render_overall_score(evaluation: PerformanceEvaluation, big_font, flex_box)
 
 
 def _matplotlib_spider_chart(evaluation: PerformanceEvaluation, width, height):
-    labels = np.array(['Accuracy', 'Timing', 'Dynamics', 'Articulation', 'Pedal'])
+    labels = np.array(['Accuracy', 'Timing', 'Dynamics', 'Articulation', 'Pedal', 'Tempo'])
     values = np.array([
         evaluation.accuracy_score,
         evaluation.timing_score,
         evaluation.dynamics_score,
         evaluation.articulation_score,
         evaluation.pedal_score,
+        evaluation.tempo_accuracy_score
     ])
     values = np.append(values, values[0])
     angles = np.linspace(0, 2 * np.pi, len(labels), endpoint=False)
