@@ -162,11 +162,11 @@ def _match_notes(ref_notes: list[Note], rec_notes: list[Note]) -> tuple[list[tup
     extras = []
     for r, c in zip(row_ind, col_ind):
         if r < m and c < n and cost_matrix[r, c] < k:
-            matches.append((ref_notes[r], rec_notes_norm[c]))
+            matches.append((ref_notes[r], rec_notes[c]))
         elif r < m:
             matches.append((ref_notes[r], None))
         elif c < n:
-            extras.append(rec_notes_norm[c])
+            extras.append(rec_notes[c])
     return matches, extras, scale
 
 
