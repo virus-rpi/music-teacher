@@ -73,7 +73,7 @@ class PerformanceEvaluation:
     dynamics_score: float = 0.0
     articulation_score: float = 0.0
     pedal_score: float = 0.0
-    comments: Optional[str] = None
+    comments: Optional[list[str]] = None
 
 @dataclass(frozen=True)
 class Note:
@@ -181,7 +181,7 @@ def _match_notes(ref_notes: list[Note], rec_notes: list[Note]) -> tuple[list[tup
     return matches, extras, scale
 
 
-def _detect_articulation(duration: int, reference_duration: int) -> articulation_type:
+def _detect_articulation(duration: float, reference_duration: int) -> articulation_type:
     """
     Classify note articulation relative to reference.
     """
@@ -351,7 +351,7 @@ class Evaluator:
             pitch_correct = r.pitch == played.pitch
             pitch_error = None if pitch_correct else (played.pitch - r.pitch)
             onset_dev = played.onset_ms - r.onset_ms
-            dur_dev = (played.duration_ms / (tempo_ratio + 1e-6)) - r.duration_ms  # adjust for tempo!
+            dur_dev = (played.duration_ms / (tempo_ratio + 1e-6)) - r.duration_ms
             vel_dev = played.velocity - r.velocity
             articulation = _detect_articulation(played.duration_ms / tempo_ratio, r.duration_ms)
 
