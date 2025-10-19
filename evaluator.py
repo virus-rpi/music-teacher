@@ -130,8 +130,8 @@ def _match_notes(ref_notes: list[Note], rec_notes: list[Note]) -> tuple[list[tup
     def note_distance(n1: Note, n2: Note) -> float:
         return (
             abs(n1.onset_ms - n2.onset_ms) / 100.0 +
-            abs(n1.pitch - n2.pitch)*4 +
-            abs(n1.duration_ms - n2.duration_ms) / 100.0
+            abs(n1.pitch - n2.pitch)*2 +
+            abs(n1.duration_ms - n2.duration_ms) / 150.0
         )
     while len(rec_notes_work) > len(ref_notes):
         distances = [min(note_distance(rn, ref) for ref in ref_notes) for rn in rec_notes_work]
@@ -156,16 +156,30 @@ def _match_notes(ref_notes: list[Note], rec_notes: list[Note]) -> tuple[list[tup
             velocity=n.velocity,
             mark=n.mark
         ))
+
+    distance_matrix = [
+        [note_distance(ref, rec_norm) for rec_norm in rec_notes_norm]
+        for ref in ref_notes
+    ]
+    all_distances = [dist for row in distance_matrix for dist in row]
+    if all_distances:
+        median = np.median(all_distances)
+        std = np.std(all_distances)
+        threshold = median + int(2.0 * float(std))
+    else:
+        threshold = float('inf')
+    print(f"Note matching threshold: {threshold}")
+
     rec_used = set()
     matches = []
     for i, ref in enumerate(ref_notes):
         best_idx = None
         best_dist = float('inf')
-        for j, rec_norm in enumerate(rec_notes_norm):
+        for j in range(len(rec_notes_norm)):
             if j in rec_used:
                 continue
-            dist = note_distance(ref, rec_norm)
-            if dist < best_dist:
+            dist = distance_matrix[i][j]
+            if dist < best_dist and dist <= threshold:
                 best_dist = dist
                 best_idx = j
         if best_idx is not None:
