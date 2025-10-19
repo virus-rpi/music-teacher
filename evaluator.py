@@ -8,13 +8,14 @@ from mido import MidiTrack
 from scipy.optimize import linear_sum_assignment
 
 weights = {
-    "accuracy": 0.30,
+    "accuracy": 0.42,
     "timing": 0.20,
-    "dynamics": 0.15,
+    "dynamics": 0.03,
     "articulation": 0.15,
     "pedal": 0.10,
     "tempo": 0.10,
 }
+assert sum(weights.values()) == 1.0, "Weights must sum to 1.0"
 
 articulation_type = Literal["staccato", "legato", "normal"]
 issue_category = Literal["accuracy", "timing", "dynamics", "pedal", "articulation"]
@@ -296,13 +297,13 @@ def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
 
     if ev.tempo_deviation_ratio < 0.95:
         percent = (1.0 - ev.tempo_deviation_ratio) * 100
-        tips.append((f"You are playing too slow ({percent:.1f}% slower than reference). Try increasing your tempo a bit!", (1.0 - ev.tempo_deviation_ratio) * weights.get("tempo", 1.0) * 1.2))
+        tips.append((f"You are playing too slow ({percent:.1f}% slower than reference). Try increasing your tempo a bit!", (1.0 - ev.tempo_deviation_ratio) * weights.get("tempo", 1.0) * 10))
     elif ev.tempo_deviation_ratio > 1.05:
         percent = (ev.tempo_deviation_ratio - 1.0) * 100
-        tips.append((f"You are playing too fast ({percent:.1f}% faster than reference). Slow down slightly to match the reference.", (ev.tempo_deviation_ratio - 1.0) * weights.get("tempo", 1.0) * 1.2))
+        tips.append((f"You are playing too fast ({percent:.1f}% faster than reference). Slow down slightly to match the reference.", (ev.tempo_deviation_ratio - 1.0) * weights.get("tempo", 1.0) * 10))
     elif abs(ev.tempo_deviation_ratio - 1.0) > 0.01:
         percent = (ev.tempo_deviation_ratio - 1.0) * 100
-        tips.append((f"Adjust your tempo slightly to match the reference (off by {percent:.1f}%).", abs(ev.tempo_deviation_ratio - 1.0) * weights.get("tempo", 1.0) * 1.2))
+        tips.append((f"Adjust your tempo slightly to match the reference (off by {percent:.1f}%).", abs(ev.tempo_deviation_ratio - 1.0) * weights.get("tempo", 1.0) * 10))
 
     if ev.accuracy_score < 0.85:
         wrong_notes = [i for i in ev.issues if i.category == "accuracy"]
