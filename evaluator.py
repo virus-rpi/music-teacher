@@ -120,15 +120,14 @@ def _match_notes(ref_notes: list[Note], rec_notes: list[Note]) -> tuple[list[tup
     if not rec_notes:
         return [(r, None) for r in ref_notes], [], 0.0
 
-    # --- Normalization (from optimize_note_matching.py) ---
     ref_onsets = np.array([n.onset_ms for n in ref_notes])
     rec_onsets = np.array([n.onset_ms for n in rec_notes])
     scale = 1.0
     if len(ref_onsets) == 0 or len(rec_onsets) == 0:
         rec_notes_norm = rec_notes
     else:
-        ref_min, ref_max = np.min(ref_onsets), np.max(ref_onsets)
-        rec_min, rec_max = np.min(rec_onsets), np.max(rec_onsets)
+        ref_min, ref_max = int(np.min(ref_onsets)), int(np.max(ref_onsets))
+        rec_min, rec_max = int(np.min(rec_onsets)), int(np.max(rec_onsets))
         ref_span, rec_span = ref_max - ref_min, rec_max - rec_min
         scale = (ref_span / rec_span) if rec_span > 0 else 1.0
         rec_notes_norm = [
@@ -152,26 +151,22 @@ def _match_notes(ref_notes: list[Note], rec_notes: list[Note]) -> tuple[list[tup
             + dur_w * abs((a.onset_ms + a.duration_ms) - (b.onset_ms + b.duration_ms))
         )
 
-    def match_lists(a, b, distance_fn, null_cost):
-        m, n = len(a), len(b)
-        size = max(m, n)
-        cost_matrix = np.full((size, size), null_cost, dtype=float)
-        for i in range(m):
-            for j in range(n):
-                cost_matrix[i, j] = distance_fn(a[i], b[j])
-        row_ind, col_ind = linear_sum_assignment(cost_matrix)
-        matches = []
-        extras = []
-        for r, c in zip(row_ind, col_ind):
-            if r < m and c < n and cost_matrix[r, c] < null_cost:
-                matches.append((a[r], b[c]))
-            elif r < m:
-                matches.append((a[r], None))
-            elif c < n:
-                extras.append(b[c])
-        return matches, extras
-
-    matches, extras = match_lists(ref_notes, rec_notes_norm, weighted_distance, k)
+    m, n = len(ref_notes), len(rec_notes_norm)
+    size = max(m, n)
+    cost_matrix = np.full((size, size), k, dtype=float)
+    for i in range(m):
+        for j in range(n):
+            cost_matrix[i, j] = weighted_distance(ref_notes[i], rec_notes_norm[j])
+    row_ind, col_ind = linear_sum_assignment(cost_matrix)
+    matches = []
+    extras = []
+    for r, c in zip(row_ind, col_ind):
+        if r < m and c < n and cost_matrix[r, c] < k:
+            matches.append((ref_notes[r], rec_notes_norm[c]))
+        elif r < m:
+            matches.append((ref_notes[r], None))
+        elif c < n:
+            extras.append(rec_notes_norm[c])
     return matches, extras, scale
 
 
