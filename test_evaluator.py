@@ -33,7 +33,9 @@ reference = (tracks[0], tracks[1])
 # Run evaluation
 evaluator = Evaluator(recording, reference)
 eval_result = evaluator.full_evaluation
+tip = evaluator.tip
 
 print("Evaluation Result:")
 print(eval_result)
+print("Top tip: ",  tip)
 

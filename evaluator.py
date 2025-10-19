@@ -282,6 +282,103 @@ def _pitch_to_name(pitch: int) -> str:
     return f"{name}{octave}"
 
 
+def _generate_tips(ev: PerformanceEvaluation) -> list[str]:
+    tips = []
+
+    if ev.tempo_deviation_ratio < 0.9:
+        tips.append(("You are playing too slow. Try increasing your tempo a bit!", 1.0 - ev.tempo_deviation_ratio))
+    elif ev.tempo_deviation_ratio > 1.1:
+        tips.append(("You are playing too fast. Slow down slightly to match the reference.",
+                     ev.tempo_deviation_ratio - 1.0))
+    elif abs(ev.tempo_deviation_ratio - 1.0) > 0.01:
+        tips.append(("To reach perfection, adjust your tempo slightly to match the reference.", ev.tempo_deviation_ratio - 1.0))
+
+    if ev.accuracy_score < 0.85:
+        tips.append((
+            f"You missed quite a few notes ({ev.wrong_notes + ev.missing_notes} total). Focus on accuracy first.",
+            1.0 - ev.accuracy_score
+        ))
+    elif ev.accuracy_score < 1.0:
+        tips.append(("To reach perfection, double-check each note for accuracy.",  1.0 - ev.accuracy_score))
+
+    if ev.extra_notes > 0:
+        tips.append((
+            f"You are adding {ev.extra_notes} unnecessary notes. Be careful not to press extra keys.",
+            0.5
+        ))
+
+    if ev.missing_notes > 0:
+        tips.append((
+            f"You are missing {ev.missing_notes} notes. Be careful not to miss any keys.",
+            0.5
+        ))
+
+    if ev.timing_score < 0.8:
+        tips.append((
+            f"Your timing is off (average deviation {ev.avg_timing_deviation_ms:.1f} ms). Practice with a metronome.",
+            1.0 - ev.timing_score
+        ))
+    elif ev.rhythmic_stability > 50:
+        tips.append((
+            f"Your rhythm fluctuates (stability {ev.rhythmic_stability:.1f}). Try keeping a steadier beat.",
+            min(ev.rhythmic_stability / 200, 1.0)
+        ))
+    elif ev.timing_score < 1.0:
+        tips.append(("To reach perfection, refine your microtiming for each note.", 1.0 - ev.timing_score))
+
+    if ev.dynamics_score < 0.85:
+        tips.append((
+            "Your dynamics are uneven. Try to control volume more consistently.",
+            1.0 - ev.dynamics_score
+        ))
+    elif ev.dynamics_score < 1.0:
+        tips.append(("To reach perfection, make your dynamics perfectly balanced.", 1.0 - ev.dynamics_score))
+
+    num_staccato = sum(1 for n in ev.notes if n.articulation == "staccato")
+    num_legato = sum(1 for n in ev.notes if n.articulation == "legato")
+
+    if num_staccato > len(ev.notes) * 0.3:
+        tips.append(("You are playing too staccato. Hold the notes longer for smoother phrasing.",
+                     num_staccato / len(ev.notes)))
+    elif num_legato > len(ev.notes) * 0.3:
+        tips.append(("You are playing too legato. Try separating the notes a bit more.",
+                     num_legato / len(ev.notes)))
+    elif num_staccato + num_legato > 0:
+        tips.append(("To reach perfection, refine your articulation to match the reference.", (num_staccato + num_legato) / len(ev.notes)))
+
+    if ev.pedal_score < 0.8:
+        tips.append(("Your pedal usage needs improvement. Listen carefully to the pedal changes in the reference.",
+                     1.0 - ev.pedal_score))
+    elif ev.pedal_score < 1.0:
+        tips.append(("To reach perfection, perfect your pedal timing and depth.", 1.0 - ev.pedal_score))
+
+    rh_issues = ev.hand_summary.get("rh", HandIssueSummary())
+    lh_issues = ev.hand_summary.get("lh", HandIssueSummary())
+    if rh_issues.total_issues > lh_issues.total_issues * 1.5:
+        tips.append(("Your right hand seems to have more mistakes. Focus on right-hand passages.", 0.6))
+    elif lh_issues.total_issues > rh_issues.total_issues * 1.5:
+        tips.append(("Your left hand seems to struggle more. Slow down left-hand parts for clarity.", 0.6))
+
+    if ev.overall_score == 1.0:
+        encouragement = "Perfect performance! You don't need this anymore. Just practice on your own and bring in your emotions."
+    elif ev.overall_score > 0.97:
+        encouragement = "Outstanding performance! Don't play too robotically — bring in your emotions. "
+    elif ev.overall_score > 0.9:
+        encouragement = "Excellent performance! "
+    elif ev.overall_score > 0.75:
+        encouragement = "Good work! "
+    else:
+        encouragement = "Keep practicing! "
+
+    tips_sorted = [t for t, _ in sorted(tips, key=lambda x: x[1], reverse=True)]
+
+    if encouragement and tips_sorted:
+        return [encouragement + tip for tip in tips_sorted]
+    elif encouragement and not tips_sorted:
+        return [encouragement.strip()]
+    return tips_sorted
+
+
 class Evaluator:
     def __init__(self, recording: MidiTrack, reference: tuple[MidiTrack, MidiTrack]):
         self.recording: MidiTrack = recording
@@ -310,7 +407,10 @@ class Evaluator:
 
     @property
     def tip(self) -> str:
-        return ""
+        evaluation = self.full_evaluation
+        if not evaluation.comments:
+            evaluation.comments = _generate_tips(evaluation)
+        return evaluation.comments[0] if evaluation.comments else "No major issues detected. Great job!"
 
     def _evaluate(self):
         ref_rh, pedals_rh = _extract_notes_and_pedal(self.reference[0], mark="rh")
