@@ -286,56 +286,63 @@ def _generate_tips(ev: PerformanceEvaluation) -> list[str]:
     tips = []
 
     if ev.tempo_deviation_ratio < 0.9:
-        tips.append(("You are playing too slow. Try increasing your tempo a bit!", 1.0 - ev.tempo_deviation_ratio))
+        tips.append((f"You are playing too slow. Try increasing your tempo a bit!", 1.0 - ev.tempo_deviation_ratio))
     elif ev.tempo_deviation_ratio > 1.1:
-        tips.append(("You are playing too fast. Slow down slightly to match the reference.",
-                     ev.tempo_deviation_ratio - 1.0))
+        tips.append((f"You are playing too fast. Slow down slightly to match the reference.", ev.tempo_deviation_ratio - 1.0))
     elif abs(ev.tempo_deviation_ratio - 1.0) > 0.01:
-        tips.append(("To reach perfection, adjust your tempo slightly to match the reference.", ev.tempo_deviation_ratio - 1.0))
+        tips.append((f"Adjust your tempo slightly to match the reference to reach perfection.", abs(ev.tempo_deviation_ratio - 1.0)))
 
     if ev.accuracy_score < 0.85:
-        tips.append((
-            f"You missed quite a few notes ({ev.wrong_notes + ev.missing_notes} total). Focus on accuracy first.",
-            1.0 - ev.accuracy_score
-        ))
+        wrong_notes = [i for i in ev.issues if i.category == "accuracy"]
+        locations = ", ".join(f"{i.note} at {i.time_ms}ms" for i in wrong_notes[:3])
+        msg = f"You missed quite a few notes ({ev.wrong_notes + ev.missing_notes} total). Focus on accuracy first."
+        if locations:
+            msg = f"Especially around {locations}. " + msg
+        tips.append((msg, 1.0 - ev.accuracy_score))
     elif ev.accuracy_score < 1.0:
         tips.append(("To reach perfection, double-check each note for accuracy.",  1.0 - ev.accuracy_score))
 
     if ev.extra_notes > 0:
-        tips.append((
-            f"You are adding {ev.extra_notes} unnecessary notes. Be careful not to press extra keys.",
-            0.5
-        ))
+        extra_notes = [i for i in ev.issues if i.category == "accuracy" and i.severity < 1.0]
+        locations = ", ".join(str(i.time_ms) for i in extra_notes[:3])
+        msg = f"You are adding {ev.extra_notes} unnecessary notes. Be careful not to press extra keys."
+        if locations:
+            msg = f"Especially around {locations}ms. " + msg
+        tips.append((msg, 0.5))
 
     if ev.missing_notes > 0:
-        tips.append((
-            f"You are missing {ev.missing_notes} notes. Be careful not to miss any keys.",
-            0.5
-        ))
+        missing_notes = [i for i in ev.issues if i.category == "accuracy" and i.severity == 1.0]
+        locations = ", ".join(str(i.time_ms) for i in missing_notes[:3])
+        msg = f"You are missing {ev.missing_notes} notes. Be careful not to miss any keys."
+        if locations:
+            msg = f"Especially around {locations}ms. " + msg
+        tips.append((msg, 0.5))
 
     if ev.timing_score < 0.8:
-        tips.append((
-            f"Your timing is off (average deviation {ev.avg_timing_deviation_ms:.1f} ms). Practice with a metronome.",
-            1.0 - ev.timing_score
-        ))
+        timing_issues = [i for i in ev.issues if i.category == "timing"]
+        locations = ", ".join(f"{i.time_ms}ms" for i in timing_issues[:3])
+        msg = f"Your timing is off (average deviation {ev.avg_timing_deviation_ms:.1f} ms). Practice with a metronome."
+        if locations:
+            msg = f"Especially at {locations}. " + msg
+        tips.append((msg, 1.0 - ev.timing_score))
     elif ev.rhythmic_stability > 50:
-        tips.append((
-            f"Your rhythm fluctuates (stability {ev.rhythmic_stability:.1f}). Try keeping a steadier beat.",
-            min(ev.rhythmic_stability / 200, 1.0)
-        ))
+        tips.append((f"Your rhythm fluctuates (stability {ev.rhythmic_stability:.1f}). Try keeping a steadier beat.", min(ev.rhythmic_stability / 200, 1.0)))
     elif ev.timing_score < 1.0:
         tips.append(("To reach perfection, refine your microtiming for each note.", 1.0 - ev.timing_score))
 
     if ev.dynamics_score < 0.85:
-        tips.append((
-            "Your dynamics are uneven. Try to control volume more consistently.",
-            1.0 - ev.dynamics_score
-        ))
+        dynamic_issues = [n for n in ev.notes if abs(n.velocity_deviation) > 10]
+        locations = ", ".join(str(n.time_ms) for n in dynamic_issues[:3])
+        msg = "Your dynamics are uneven. Try to control volume more consistently."
+        if locations:
+            msg = f"Especially around {locations}ms. " + msg
+        tips.append((msg, 1.0 - ev.dynamics_score))
     elif ev.dynamics_score < 1.0:
         tips.append(("To reach perfection, make your dynamics perfectly balanced.", 1.0 - ev.dynamics_score))
 
     num_staccato = sum(1 for n in ev.notes if n.articulation == "staccato")
     num_legato = sum(1 for n in ev.notes if n.articulation == "legato")
+    articulation_issues = [n for n in ev.notes if n.articulation and n.articulation != "normal"]
 
     if num_staccato > len(ev.notes) * 0.3:
         tips.append(("You are playing too staccato. Hold the notes longer for smoother phrasing.",
@@ -346,9 +353,20 @@ def _generate_tips(ev: PerformanceEvaluation) -> list[str]:
     elif num_staccato + num_legato > 0:
         tips.append(("To reach perfection, refine your articulation to match the reference.", (num_staccato + num_legato) / len(ev.notes)))
 
+    if articulation_issues:
+        locations = ", ".join(str(n.time_ms) for n in articulation_issues[:3])
+        msg = "Refine articulation to match the reference."
+        if locations:
+            msg = f"Especially at {locations}ms. " + msg
+        tips.append((msg, sum(1 for _ in articulation_issues)/len(ev.notes)))
+
     if ev.pedal_score < 0.8:
-        tips.append(("Your pedal usage needs improvement. Listen carefully to the pedal changes in the reference.",
-                     1.0 - ev.pedal_score))
+        pedal_issues = [i for i in ev.issues if i.category == "pedal"]
+        locations = ", ".join(str(i.time_ms) for i in pedal_issues[:3])
+        msg = "Your pedal usage needs improvement. Listen carefully to the pedal changes in the reference."
+        if locations:
+            msg = f"Especially around {locations}ms. " + msg
+        tips.append((msg, 1.0 - ev.pedal_score))
     elif ev.pedal_score < 1.0:
         tips.append(("To reach perfection, perfect your pedal timing and depth.", 1.0 - ev.pedal_score))
 
@@ -371,11 +389,8 @@ def _generate_tips(ev: PerformanceEvaluation) -> list[str]:
         encouragement = "Keep practicing! "
 
     tips_sorted = [t for t, _ in sorted(tips, key=lambda x: x[1], reverse=True)]
-
-    if encouragement and tips_sorted:
-        return [encouragement + tip for tip in tips_sorted]
-    elif encouragement and not tips_sorted:
-        return [encouragement.strip()]
+    if encouragement:
+        return [encouragement + tip for tip in tips_sorted] if tips_sorted else [encouragement.strip()]
     return tips_sorted
 
 
