@@ -5,6 +5,7 @@ from pprint import pprint
 from typing import Optional, Literal
 import numpy as np
 from mido import MidiTrack
+from scipy.optimize import linear_sum_assignment
 
 articulation_type = Literal["staccato", "legato", "normal"]
 issue_category = Literal["accuracy", "timing", "dynamics", "pedal", "articulation"]
@@ -113,83 +114,65 @@ def _extract_notes_and_pedal(track: MidiTrack, mark: Optional[str]=None) -> tupl
     return notes, pedals
 
 
-def _match_notes(ref_notes: list[Note], rec_notes: list[Note]) -> tuple[list[tuple[Note, Optional[Note]]], list[Note]]:
-    """
-    Alternative algorithm:
-    1. Strip the furthest notes (by onset/pitch/duration distance) from rec_notes until len(rec_notes) == len(ref_notes), collecting extras.
-    2. Normalize rec_notes tempo to match ref_notes (scale onset/duration).
-    3. Match each rec_note to the closest ref_note (using a distance metric combining onset, pitch, and duration).
-    4. Return the matches and extras.
-    """
+def _match_notes(ref_notes: list[Note], rec_notes: list[Note]) -> tuple[list[tuple[Note, Optional[Note]]], list[Note], float]:
     if not ref_notes:
-        return [], rec_notes.copy()
+        return [], rec_notes.copy(), 1.0
     if not rec_notes:
-        return [(r, None) for r in ref_notes], []
-    rec_notes_work = rec_notes.copy()
-    extras = []
-    def note_distance(n1: Note, n2: Note) -> float:
-        return (
-            abs(n1.onset_ms - n2.onset_ms) / 100.0 +
-            abs(n1.pitch - n2.pitch)*2 +
-            abs(n1.duration_ms - n2.duration_ms) / 150.0
-        )
-    while len(rec_notes_work) > len(ref_notes):
-        distances = [min(note_distance(rn, ref) for ref in ref_notes) for rn in rec_notes_work]
-        extras.append(rec_notes_work.pop(int(np.argmax(distances))))
+        return [(r, None) for r in ref_notes], [], 0.0
 
+    # --- Normalization (from optimize_note_matching.py) ---
     ref_onsets = np.array([n.onset_ms for n in ref_notes])
-    rec_onsets = np.array([n.onset_ms for n in rec_notes_work])
-    if len(ref_onsets) > 1 and len(rec_onsets) > 1:
-        ref_span = ref_onsets[-1] - ref_onsets[0]
-        rec_span = rec_onsets[-1] - rec_onsets[0]
+    rec_onsets = np.array([n.onset_ms for n in rec_notes])
+    scale = 1.0
+    if len(ref_onsets) == 0 or len(rec_onsets) == 0:
+        rec_notes_norm = rec_notes
+    else:
+        ref_min, ref_max = np.min(ref_onsets), np.max(ref_onsets)
+        rec_min, rec_max = np.min(rec_onsets), np.max(rec_onsets)
+        ref_span, rec_span = ref_max - ref_min, rec_max - rec_min
         scale = (ref_span / rec_span) if rec_span > 0 else 1.0
-    else:
-        scale = 1.0
-    rec_notes_norm = []
-    for n in rec_notes_work:
-        onset = int(ref_onsets[0] + (n.onset_ms - rec_onsets[0]) * scale)
-        duration = int(n.duration_ms * scale)
-        rec_notes_norm.append(Note(
-            pitch=n.pitch,
-            onset_ms=onset,
-            duration_ms=duration,
-            velocity=n.velocity,
-            mark=n.mark
-        ))
+        rec_notes_norm = [
+            Note(
+                pitch=n.pitch,
+                onset_ms=int(ref_min + (n.onset_ms - rec_min) * scale),
+                duration_ms=int(n.duration_ms * scale),
+                velocity=n.velocity,
+                mark=n.mark,
+            )
+            for n in rec_notes
+        ]
 
-    distance_matrix = [
-        [note_distance(ref, rec_norm) for rec_norm in rec_notes_norm]
-        for ref in ref_notes
-    ]
-    all_distances = [dist for row in distance_matrix for dist in row]
-    if all_distances:
-        median = np.median(all_distances)
-        std = np.std(all_distances)
-        threshold = median + int(2.0 * float(std))
-    else:
-        threshold = float('inf')
-    print(f"Note matching threshold: {threshold}")
+    onset_w, pitch_w, dur_w, k = 0.001, 3.0, 0.05, 15.0
+    def weighted_distance(a, b):
+        if a is None or b is None:
+            return k
+        return (
+            pitch_w * abs(a.pitch - b.pitch)
+            + onset_w * abs(a.onset_ms - b.onset_ms)
+            + dur_w * abs((a.onset_ms + a.duration_ms) - (b.onset_ms + b.duration_ms))
+        )
 
-    rec_used = set()
-    matches = []
-    for i, ref in enumerate(ref_notes):
-        best_idx = None
-        best_dist = float('inf')
-        for j in range(len(rec_notes_norm)):
-            if j in rec_used:
-                continue
-            dist = distance_matrix[i][j]
-            if dist < best_dist and dist <= threshold:
-                best_dist = dist
-                best_idx = j
-        if best_idx is not None:
-            matches.append((ref, rec_notes_work[best_idx]))
-            rec_used.add(best_idx)
-        else:
-            matches.append((ref, None))
-    for i in set(range(len(rec_notes_work))) - rec_used:
-        extras.append(rec_notes_work[i])
-    return matches, extras
+    def match_lists(a, b, distance_fn, null_cost):
+        m, n = len(a), len(b)
+        size = max(m, n)
+        cost_matrix = np.full((size, size), null_cost, dtype=float)
+        for i in range(m):
+            for j in range(n):
+                cost_matrix[i, j] = distance_fn(a[i], b[j])
+        row_ind, col_ind = linear_sum_assignment(cost_matrix)
+        matches = []
+        extras = []
+        for r, c in zip(row_ind, col_ind):
+            if r < m and c < n and cost_matrix[r, c] < null_cost:
+                matches.append((a[r], b[c]))
+            elif r < m:
+                matches.append((a[r], None))
+            elif c < n:
+                extras.append(b[c])
+        return matches, extras
+
+    matches, extras = match_lists(ref_notes, rec_notes_norm, weighted_distance, k)
+    return matches, extras, scale
 
 
 def _detect_articulation(duration: int, reference_duration: int) -> articulation_type:
@@ -330,7 +313,7 @@ class Evaluator:
         ref_all = sorted(ref_rh + ref_lh, key=lambda note: note.onset_ms)
         ref_pedals = sorted(pedals_rh + pedals_lh, key=lambda pedal: pedal.time_ms)
 
-        matches, extras = _match_notes(ref_all, rec_notes)
+        matches, extras, tempo_ratio = _match_notes(ref_all, rec_notes)
         evaluation = PerformanceEvaluation(total_notes=len(ref_all))
 
         for r, played in matches:
