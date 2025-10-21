@@ -132,6 +132,17 @@ def _extract_notes_and_pedal(track: MidiTrack, mark: Optional[str]=None) -> tupl
                 pedal_type=pedal_types[msg.control]
             ))
 
+    while note_on:
+        pitch, (start_time, velocity) = note_on.popitem()
+        duration = current_time - start_time
+        notes.append(Note(
+            pitch=pitch,
+            onset_ms=start_time,
+            duration_ms=duration,
+            velocity=velocity,
+            mark=mark
+        ))
+
     return notes, pedals
 
 
