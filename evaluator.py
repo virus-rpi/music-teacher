@@ -20,7 +20,7 @@ weights = {
     "pedal": 0.10,
     "tempo": 0.10,
 }
-assert sum(weights.values()) == 1.0, "Weights must sum to 1.0"
+assert abs(sum(weights.values()) - 1.0) < 1e-9, "Weights must sum to 1.0"
 
 def _match_notes(ref_notes: list[Note], rec_notes: list[Note]) -> tuple[list[tuple[Note, Optional[Note]]], list[Note], float]:
     if not ref_notes:
