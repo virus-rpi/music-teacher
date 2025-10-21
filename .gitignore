@@ -3,3 +3,4 @@ saves/*
 save/*
 *.mtsf
 src/music_teacher.egg-info
+.idea

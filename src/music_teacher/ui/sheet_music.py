@@ -11,13 +11,25 @@ from ..utils.save_system import SaveSystem
 import io
 
 _resampling = getattr(Image, "Resampling", Image)
-RESAMPLE_LANCZOS = getattr(_resampling, "LANCZOS", getattr(_resampling, "BICUBIC", getattr(Image, "NEAREST", 0)))
+RESAMPLE_LANCZOS = getattr(
+    _resampling,
+    "LANCZOS",
+    getattr(_resampling, "BICUBIC", getattr(Image, "NEAREST", 0)),
+)
 _CAIROSVG_DPI = 1200
 strip_png = "strip.png"
 song_svg = "song.svg"
 
+
 class SheetMusicRenderer:
-    def __init__(self, midi_path: str | Path, screen_width: int, save_system: SaveSystem, height: int = 260, debug: bool = False) -> None:
+    def __init__(
+        self,
+        midi_path: str | Path,
+        screen_width: int,
+        save_system: SaveSystem,
+        height: int = 260,
+        debug: bool = False,
+    ) -> None:
         self.midi_path = Path(midi_path)
         self.screen_width = int(screen_width)
         self.strip_height = int(height)
@@ -43,20 +55,41 @@ class SheetMusicRenderer:
 
     def _load_cache_data(self) -> None:
         with self.save_system as s:
-            self.notehead_xs = [float(x) for x in json.loads(s.load_file("note_xs.json")) if x is not None] if s.file_exists("note_xs.json") else []
-            self.measure_data = [
-                (float(tup[0]) if tup[0] is not None else None, float(tup[1]) if tup[1] is not None else None, int(tup[2] or 0))
-                if tup is not None and len(tup) == 3 else (None, None, 0)
-                for tup in json.loads(s.load_file("measure_data.json"))
-            ] if s.file_exists("measure_data.json") else []
+            self.notehead_xs = (
+                [
+                    float(x)
+                    for x in json.loads(s.load_file("note_xs.json"))
+                    if x is not None
+                ]
+                if s.file_exists("note_xs.json")
+                else []
+            )
+            self.measure_data = (
+                [
+                    (
+                        float(tup[0]) if tup[0] is not None else None,
+                        float(tup[1]) if tup[1] is not None else None,
+                        int(tup[2] or 0),
+                    )
+                    if tup is not None and len(tup) == 3
+                    else (None, None, 0)
+                    for tup in json.loads(s.load_file("measure_data.json"))
+                ]
+                if s.file_exists("measure_data.json")
+                else []
+            )
 
     def _call_midi_to_svg(self, cache_dir: Path, svg_out: Path) -> None:
         try:
             try:
-                res_note_xs, res_measure_data = midi_to_svg(str(self.midi_path), str(cache_dir))
+                res_note_xs, res_measure_data = midi_to_svg(
+                    str(self.midi_path), str(cache_dir)
+                )
             except TypeError:
-                res_note_xs, res_measure_data = midi_to_svg(str(self.midi_path), str(cache_dir), "mscore")
-            
+                res_note_xs, res_measure_data = midi_to_svg(
+                    str(self.midi_path), str(cache_dir), "mscore"
+                )
+
             self.measure_data = res_measure_data
             if isinstance(res_note_xs, list):
                 self.notehead_xs = [float(x) for x in res_note_xs]
@@ -77,12 +110,16 @@ class SheetMusicRenderer:
                                 serializable_measure_data.append([sx, ex, n])
                             else:
                                 serializable_measure_data.append([None, None, 0])
-                        s.save_file("measure_data.json", json.dumps(serializable_measure_data))
+                        s.save_file(
+                            "measure_data.json", json.dumps(serializable_measure_data)
+                        )
                 except (OSError, TypeError, ValueError) as e:
                     print(f"SheetMusicRenderer: failed to save measure data: {e}")
 
         except (RuntimeError, OSError, ValueError, TypeError) as e:
-            print("SheetMusicRenderer: failed to render SVG via sheet_music_renderer:", e)
+            print(
+                "SheetMusicRenderer: failed to render SVG via sheet_music_renderer:", e
+            )
             return
 
         if not svg_out.exists():
@@ -91,19 +128,29 @@ class SheetMusicRenderer:
                 svg_out = svgs[0]
 
         if not svg_out.exists():
-            print("No SVG produced by sheet_music_renderer; aborting strip preparation.")
+            print(
+                "No SVG produced by sheet_music_renderer; aborting strip preparation."
+            )
             return
 
     @staticmethod
     def _convert_svg_to_png(svg_out: Path, strip_png_path: Path) -> bool:
         try:
-            cairosvg.svg2png(url=str(svg_out), write_to=str(strip_png_path), dpi=_CAIROSVG_DPI, scale=2.0, negate_colors=True)
+            cairosvg.svg2png(
+                url=str(svg_out),
+                write_to=str(strip_png_path),
+                dpi=_CAIROSVG_DPI,
+                scale=2.0,
+                negate_colors=True,
+            )
             return True
         except (RuntimeError, OSError, ValueError) as e:
             print("Failed to convert SVG to PNG: ", e)
             return False
 
-    def _open_and_process_image(self) -> tuple[Optional[Image.Image], Optional[float], int, int]:
+    def _open_and_process_image(
+        self,
+    ) -> tuple[Optional[Image.Image], Optional[float], int, int]:
         """Open PNG, crop whitespace on the left, resize to strip_height.
         Returns (pil_image, svg_width_if_found_or_None, cropped_w, left_crop)
         """
@@ -119,9 +166,11 @@ class SheetMusicRenderer:
                 try:
                     tree = ElementTree.parse(io.BytesIO(s.load_file(song_svg)))
                     root = tree.getroot()
-                    w = root.get('width') or root.get('{http://www.w3.org/2000/svg}width')
+                    w = root.get("width") or root.get(
+                        "{http://www.w3.org/2000/svg}width"
+                    )
                     if w:
-                        if isinstance(w, str) and w.endswith('px'):
+                        if isinstance(w, str) and w.endswith("px"):
                             w = w[:-2]
                         svg_width = float(w)
                 except (ElementTree.ParseError, OSError, ValueError) as e:
@@ -139,11 +188,17 @@ class SheetMusicRenderer:
         cropped_w = im.width
         scale = self.strip_height / float(max(1, im.height))
         new_w = max(1, int(im.width * scale))
-        strip_resized = im.resize((new_w, self.strip_height), RESAMPLE_LANCZOS).convert("RGBA")
-        strip_resized = strip_resized.filter(ImageFilter.UnsharpMask(radius=0.5, percent=150, threshold=2))
+        strip_resized = im.resize((new_w, self.strip_height), RESAMPLE_LANCZOS).convert(
+            "RGBA"
+        )
+        strip_resized = strip_resized.filter(
+            ImageFilter.UnsharpMask(radius=0.5, percent=150, threshold=2)
+        )
         return strip_resized, svg_width, cropped_w, left_crop
 
-    def _scale_cached_note_positions(self, svg_width, cropped_w, left_crop, strip_resized):
+    def _scale_cached_note_positions(
+        self, svg_width, cropped_w, left_crop, strip_resized
+    ):
         if not self.notehead_xs:
             return
         try:
@@ -178,7 +233,9 @@ class SheetMusicRenderer:
                                     item_px = float(item) * pixels_per_svg_unit
                                     item_adj_px = item_px - float(left_crop)
                                     if 0 <= item_adj_px <= float(cropped_w):
-                                        scaled.append(int(round(item_adj_px * final_scale)))
+                                        scaled.append(
+                                            int(round(item_adj_px * final_scale))
+                                        )
                                     else:
                                         scaled.append(None)
                                 except (TypeError, ValueError):
@@ -200,11 +257,19 @@ class SheetMusicRenderer:
             cache_dir = s.get_absolute_path()
             self._load_cache_data()
 
-            if not s.file_exists(strip_png) or not self.notehead_xs or not self.measure_data:
+            if (
+                not s.file_exists(strip_png)
+                or not self.notehead_xs
+                or not self.measure_data
+            ):
                 self._call_midi_to_svg(cache_dir, s.get_absolute_path(song_svg))
                 if not s.file_exists(song_svg):
-                    raise RuntimeError("No SVG produced by sheet_music_renderer; aborting strip preparation.")
-                ok = self._convert_svg_to_png(s.get_absolute_path(song_svg), s.get_absolute_path(strip_png))
+                    raise RuntimeError(
+                        "No SVG produced by sheet_music_renderer; aborting strip preparation."
+                    )
+                ok = self._convert_svg_to_png(
+                    s.get_absolute_path(song_svg), s.get_absolute_path(strip_png)
+                )
                 if not ok:
                     return
 
@@ -213,18 +278,34 @@ class SheetMusicRenderer:
             return
         try:
             data = strip_resized.tobytes()
-            self.full_surface = pygame.image.frombytes(data, strip_resized.size, "RGBA").convert_alpha()
+            self.full_surface = pygame.image.frombytes(
+                data, strip_resized.size, "RGBA"
+            ).convert_alpha()
         except (pygame.error, ValueError, TypeError) as e:
             print("Failed to create pygame surface from strip image:", e)
             return
 
         self.full_width = strip_resized.size[0]
-        self._scale_cached_note_positions(svg_width=svg_width, cropped_w=cropped_w, left_crop=left_crop, strip_resized=strip_resized)
+        self._scale_cached_note_positions(
+            svg_width=svg_width,
+            cropped_w=cropped_w,
+            left_crop=left_crop,
+            strip_resized=strip_resized,
+        )
 
         if self.debug:
-            print(f"Built strip from SVG: width={self.full_width}px, detected {len(self.notehead_xs)} visual noteheads")
+            print(
+                f"Built strip from SVG: width={self.full_width}px, detected {len(self.notehead_xs)} visual noteheads"
+            )
 
-    def draw(self, screen: pygame.Surface, y: int, progress: float, guided_teacher, alpha: float = 1.0) -> None:
+    def draw(
+        self,
+        screen: pygame.Surface,
+        y: int,
+        progress: float,
+        guided_teacher,
+        alpha: float = 1.0,
+    ) -> None:
         if self.full_surface is None:
             return
         view_w = self.screen_width
@@ -232,7 +313,11 @@ class SheetMusicRenderer:
         self._compute_target_offset(view_w, progress)
         dt = self._update_view_smoothing()
 
-        x_off = int(round(max(0.0, min(self.view_x_off, float(max(0, self.full_width - view_w))))))
+        x_off = int(
+            round(
+                max(0.0, min(self.view_x_off, float(max(0, self.full_width - view_w))))
+            )
+        )
         src_rect = pygame.Rect(x_off, 0, view_w, self.strip_height)
 
         overlay = pygame.Surface((view_w, self.strip_height), pygame.SRCALPHA)
@@ -241,14 +326,21 @@ class SheetMusicRenderer:
         screen_play_x = self._compute_screen_play_x(view_w, x_off, dt)
         current_note_highlight = self._draw_overlay(overlay, view_w, screen_play_x)
         if guided_teacher is not None:
-            self._draw_guided_highlight(overlay, guided_teacher, x_off, current_note_highlight)
+            self._draw_guided_highlight(
+                overlay, guided_teacher, x_off, current_note_highlight
+            )
         self._draw_debug_lines(overlay, 0, x_off, view_w)
         aa = max(0.0, min(1.0, float(alpha)))
         overlay.set_alpha(int(aa * 255))
         screen.blit(overlay, (0, y))
 
-    def _draw_guided_highlight(self, screen, guided_teacher, x_off, current_note_highlight=None):
-        if not guided_teacher.is_active or not guided_teacher.current_section_visual_info:
+    def _draw_guided_highlight(
+        self, screen, guided_teacher, x_off, current_note_highlight=None
+    ):
+        if (
+            not guided_teacher.is_active
+            or not guided_teacher.current_section_visual_info
+        ):
             return
         padding = 12
         animation_duration = 150  # ms
@@ -256,48 +348,60 @@ class SheetMusicRenderer:
 
         start_x = guided_teacher.current_section_visual_info[0]
         rect_x = start_x - padding
-        rect_w = guided_teacher.current_section_visual_info[-1] - start_x + padding*2
+        rect_w = guided_teacher.current_section_visual_info[-1] - start_x + padding * 2
 
         now = pygame.time.get_ticks()
         target = (rect_x, 0, rect_w, self.strip_height)
         if not hasattr(self, "_guided_anim_state"):
             self._guided_anim_state = {
-                'prev': target,
-                'target': target,
-                'start_time': now,
-                'animating': False
+                "prev": target,
+                "target": target,
+                "start_time": now,
+                "animating": False,
             }
         state = self._guided_anim_state
-        if state['target'] != target:
-            state['prev'] = state['prev'] if state['animating'] else state['target']
-            state['target'] = target
-            state['start_time'] = now
-            state['animating'] = True
-        if state['animating']:
-            elapsed = now - state['start_time']
+        if state["target"] != target:
+            state["prev"] = state["prev"] if state["animating"] else state["target"]
+            state["target"] = target
+            state["start_time"] = now
+            state["animating"] = True
+        if state["animating"]:
+            elapsed = now - state["start_time"]
             t = min(1.0, elapsed / animation_duration)
             interp = lambda a, b: a + (b - a) * t
-            cur_rect = tuple(int(interp(p, q)) for p, q in zip(state['prev'], state['target']))
+            cur_rect = tuple(
+                int(interp(p, q)) for p, q in zip(state["prev"], state["target"])
+            )
             if t >= 1.0:
-                state['animating'] = False
-                state['prev'] = state['target']
+                state["animating"] = False
+                state["prev"] = state["target"]
         else:
-            cur_rect = state['target']
+            cur_rect = state["target"]
         overlay = pygame.Surface((cur_rect[2], cur_rect[3]), pygame.SRCALPHA)
-        pygame.draw.rect(overlay, rect_color, (0, 0, cur_rect[2], cur_rect[3]), border_radius=10)
-        overlay.blit(
-            pygame.Surface((current_note_highlight[2], current_note_highlight[3]), pygame.SRCALPHA) if current_note_highlight else pygame.Surface((0, 0), pygame.SRCALPHA),
-            (current_note_highlight[0]-cur_rect[0]+x_off, 0) if current_note_highlight else (0, 0),
-            None,
-            pygame.BLEND_RGBA_MULT
+        pygame.draw.rect(
+            overlay, rect_color, (0, 0, cur_rect[2], cur_rect[3]), border_radius=10
         )
-        screen.blit(overlay, (cur_rect[0]-x_off, cur_rect[1]))
+        overlay.blit(
+            pygame.Surface(
+                (current_note_highlight[2], current_note_highlight[3]), pygame.SRCALPHA
+            )
+            if current_note_highlight
+            else pygame.Surface((0, 0), pygame.SRCALPHA),
+            (current_note_highlight[0] - cur_rect[0] + x_off, 0)
+            if current_note_highlight
+            else (0, 0),
+            None,
+            pygame.BLEND_RGBA_MULT,
+        )
+        screen.blit(overlay, (cur_rect[0] - x_off, cur_rect[1]))
 
     def _compute_target_offset(self, view_w: int, progress: float) -> None:
         """Compute and set self._target_x_off based on the current note index or progress."""
         max_off = max(0, self.full_width - view_w)
         play_x = int(view_w * 0.45)
-        if self.notehead_xs and 0 <= int(self._current_note_idx) < len(self.notehead_xs):
+        if self.notehead_xs and 0 <= int(self._current_note_idx) < len(
+            self.notehead_xs
+        ):
             target_x = int(self.notehead_xs[int(self._current_note_idx)])
             desired = int(target_x - play_x)
             desired = max(0, min(desired, max_off))
@@ -309,7 +413,7 @@ class SheetMusicRenderer:
     def _update_view_smoothing(self) -> float:
         """Update view offset smoothing; returns dt in seconds used for this frame."""
         now_ms = pygame.time.get_ticks()
-        dt = max(0.0, (now_ms - getattr(self, '_last_time_ms', now_ms)) / 1000.0)
+        dt = max(0.0, (now_ms - getattr(self, "_last_time_ms", now_ms)) / 1000.0)
         self._last_time_ms = now_ms
         if dt > 0.0:
             alpha = 1.0 - math.exp(-dt / max(1e-6, self._scroll_tau))
@@ -325,8 +429,12 @@ class SheetMusicRenderer:
         current chord/note visual is expected. This mirrors the original logic,
         so the overlay and strip scrolling remain synchronized.
         """
-        if self.notehead_xs and 0 <= int(self._current_note_idx) < len(self.notehead_xs):
-            desired_screen_play = float(int(self.notehead_xs[int(self._current_note_idx)]) - x_off)
+        if self.notehead_xs and 0 <= int(self._current_note_idx) < len(
+            self.notehead_xs
+        ):
+            desired_screen_play = float(
+                int(self.notehead_xs[int(self._current_note_idx)]) - x_off
+            )
         else:
             desired_screen_play = float(int(view_w * 0.45))
 
@@ -348,7 +456,14 @@ class SheetMusicRenderer:
         if self._screen_play_x is not None:
             return
         try:
-            cur_idx = int(self._current_note_idx) if (self.notehead_xs and 0 <= int(self._current_note_idx) < len(self.notehead_xs)) else None
+            cur_idx = (
+                int(self._current_note_idx)
+                if (
+                    self.notehead_xs
+                    and 0 <= int(self._current_note_idx) < len(self.notehead_xs)
+                )
+                else None
+            )
             if cur_idx is not None:
                 start_play = float(int(self.notehead_xs[cur_idx]) - x_off)
             else:
@@ -366,9 +481,16 @@ class SheetMusicRenderer:
         """
         view_w = self.screen_width
         try:
-            x_off = int(round(max(0.0, min(self.view_x_off, float(max(0, self.full_width - view_w))))))
+            x_off = int(
+                round(
+                    max(
+                        0.0,
+                        min(self.view_x_off, float(max(0, self.full_width - view_w))),
+                    )
+                )
+            )
         except (AttributeError, TypeError, ValueError):
-            x_off = int(round(self.view_x_off)) if hasattr(self, '_view_x_off') else 0
+            x_off = int(round(self.view_x_off)) if hasattr(self, "_view_x_off") else 0
         return view_w, x_off
 
     def _draw_overlay(self, screen: pygame.Surface, view_w: int, screen_play_x: float):
@@ -382,11 +504,19 @@ class SheetMusicRenderer:
         except (pygame.error, TypeError):
             pass
         line_color = (0, 200, 255, 200)
-        pygame.draw.line(overlay, line_color, (int(round(screen_play_x)), 0), (int(round(screen_play_x)), rect_h), 3)
+        pygame.draw.line(
+            overlay,
+            line_color,
+            (int(round(screen_play_x)), 0),
+            (int(round(screen_play_x)), rect_h),
+            3,
+        )
         screen.blit(overlay, (0, 0))
         return rect_x, 0, rect_w, rect_h
 
-    def _draw_debug_lines(self, screen: pygame.Surface, y: int, x_off: int, view_w: int) -> None:
+    def _draw_debug_lines(
+        self, screen: pygame.Surface, y: int, x_off: int, view_w: int
+    ) -> None:
         if not self.debug:
             return
         positions = set()
@@ -397,7 +527,13 @@ class SheetMusicRenderer:
         for gx in sorted(positions):
             sx = gx - x_off
             if -4 <= sx <= view_w + 4:
-                pygame.draw.line(screen, (90, 255, 120), (int(sx), y), (int(sx), y + self.strip_height), 1)
+                pygame.draw.line(
+                    screen,
+                    (90, 255, 120),
+                    (int(sx), y),
+                    (int(sx), y + self.strip_height),
+                    1,
+                )
 
     def seek_to_index(self, index: int, animate: bool = True) -> None:
         """Seek directly to a visual note index (clamped).
@@ -409,7 +545,9 @@ class SheetMusicRenderer:
                 view_w, x_off = self._compute_view_and_xoff()
             except (AttributeError, TypeError, ValueError):
                 view_w = self.screen_width
-                x_off = int(round(self.view_x_off)) if hasattr(self, 'view_x_off') else 0
+                x_off = (
+                    int(round(self.view_x_off)) if hasattr(self, "view_x_off") else 0
+                )
 
             if animate:
                 self._init_screen_play_x(view_w, x_off)

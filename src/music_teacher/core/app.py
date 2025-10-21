@@ -17,8 +17,8 @@ from ..ui.sheet_music import SheetMusicRenderer
 from .guided_teacher import GuidedTeacher
 from ..utils.save_system import SaveSystem
 
-LOWEST_NOTE = 21   # A0
-HIGHEST_NOTE = 108 # C8
+LOWEST_NOTE = 21  # A0
+HIGHEST_NOTE = 108  # C8
 TOTAL_KEYS = HIGHEST_NOTE - LOWEST_NOTE + 1
 SOUNDFONT_PATH = "/home/u200b/Music/Sound fonts/GeneralUser-GS.sf2"
 
@@ -64,24 +64,25 @@ alpha_tau = 0.18
 last_time_ms = pygame.time.get_ticks()
 
 dims = {
-    'SCREEN_WIDTH': SCREEN_WIDTH,
-    'SCREEN_HEIGHT': SCREEN_HEIGHT,
-    'WHITE_KEY_WIDTH': WHITE_KEY_WIDTH,
-    'WHITE_KEY_HEIGHT': WHITE_KEY_HEIGHT,
-    'BLACK_KEY_WIDTH': BLACK_KEY_WIDTH,
-    'BLACK_KEY_HEIGHT': BLACK_KEY_HEIGHT,
-    'PEDAL_WIDTH': PEDAL_WIDTH,
-    'PEDAL_HEIGHT': PEDAL_HEIGHT,
-    'PEDAL_SPACING': PEDAL_SPACING,
-    'PEDAL_Y': PEDAL_Y,
-    'LOWEST_NOTE': LOWEST_NOTE,
-    'HIGHEST_NOTE': HIGHEST_NOTE,
-    'PIANO_Y_OFFSET': PIANO_Y_OFFSET,
-    'SHEET_Y': SHEET_Y
+    "SCREEN_WIDTH": SCREEN_WIDTH,
+    "SCREEN_HEIGHT": SCREEN_HEIGHT,
+    "WHITE_KEY_WIDTH": WHITE_KEY_WIDTH,
+    "WHITE_KEY_HEIGHT": WHITE_KEY_HEIGHT,
+    "BLACK_KEY_WIDTH": BLACK_KEY_WIDTH,
+    "BLACK_KEY_HEIGHT": BLACK_KEY_HEIGHT,
+    "PEDAL_WIDTH": PEDAL_WIDTH,
+    "PEDAL_HEIGHT": PEDAL_HEIGHT,
+    "PEDAL_SPACING": PEDAL_SPACING,
+    "PEDAL_Y": PEDAL_Y,
+    "LOWEST_NOTE": LOWEST_NOTE,
+    "HIGHEST_NOTE": HIGHEST_NOTE,
+    "PIANO_Y_OFFSET": PIANO_Y_OFFSET,
+    "SHEET_Y": SHEET_Y,
 }
 
 font_small = pygame.font.SysFont("Segoe UI", 16)
 font_medium = pygame.font.SysFont("Segoe UI", 20, bold=True)
+
 
 def save_all():
     try:
@@ -90,14 +91,23 @@ def save_all():
     except Exception as e:
         print(f"Failed to save state: {e}")
 
+
 save_system = SaveSystem(before_exit_callback=save_all)
 
 midi_path = save_system.load_midi_path() or input("Enter path to MIDI file: ").strip()
 
 state_lock = threading.Lock()
 
+
 def render():
-    global last_time_ms, piano_y_current, piano_y_target, overlay_alpha_current, overlay_alpha_target, sheet_alpha_current, sheet_alpha_target
+    global \
+        last_time_ms, \
+        piano_y_current, \
+        piano_y_target, \
+        overlay_alpha_current, \
+        overlay_alpha_target, \
+        sheet_alpha_current, \
+        sheet_alpha_target
     now_ms = pygame.time.get_ticks()
     dt = max(0.0, (now_ms - last_time_ms) / 1000.0)
     last_time_ms = now_ms
@@ -113,18 +123,38 @@ def render():
         b = 1.0 - math.exp(-dt / max(1e-6, alpha_tau))
         overlay_alpha_current += (overlay_alpha_target - overlay_alpha_current) * b
         sheet_alpha_current += (sheet_alpha_target - sheet_alpha_current) * b
-    dims['PIANO_Y_OFFSET'] = piano_y_current
-    dims['PEDAL_Y'] = int(piano_y_current + WHITE_KEY_HEIGHT + 30)
+    dims["PIANO_Y_OFFSET"] = piano_y_current
+    dims["PEDAL_Y"] = int(piano_y_current + WHITE_KEY_HEIGHT + 30)
     with state_lock:
         pressed_keys_snapshot = dict(pressed_keys)
         pressed_fade_keys_snapshot = dict(pressed_fade_keys)
         pedals_snapshot = dict(pedals)
-    draw_piano(screen, pressed_keys_snapshot, pressed_fade_keys_snapshot, pedals_snapshot, dims,
-               midi_teacher.get_next_notes() if teaching_mode else set())
-    draw_ui_overlay(screen, midi_teacher, dims, guided_teacher, font_small, font_medium, alpha=overlay_alpha_current)
+    draw_piano(
+        screen,
+        pressed_keys_snapshot,
+        pressed_fade_keys_snapshot,
+        pedals_snapshot,
+        dims,
+        midi_teacher.get_next_notes() if teaching_mode else set(),
+    )
+    draw_ui_overlay(
+        screen,
+        midi_teacher,
+        dims,
+        guided_teacher,
+        font_small,
+        font_medium,
+        alpha=overlay_alpha_current,
+    )
     if guided_mode and teaching_mode:
         draw_guided_mode_overlay(screen, guided_teacher, sheet_music_renderer, dims)
-    sheet_music_renderer.draw(screen, dims.get('SHEET_Y', 0), midi_teacher.get_progress(), guided_teacher, sheet_alpha_current)
+    sheet_music_renderer.draw(
+        screen,
+        dims.get("SHEET_Y", 0),
+        midi_teacher.get_progress(),
+        guided_teacher,
+        sheet_alpha_current,
+    )
 
     guided_teacher.render(screen)
 
@@ -132,9 +162,12 @@ def render():
 
 
 synth = Synth(SOUNDFONT_PATH, render)
-sheet_music_renderer = SheetMusicRenderer(midi_path, SCREEN_WIDTH, save_system=save_system)
+sheet_music_renderer = SheetMusicRenderer(
+    midi_path, SCREEN_WIDTH, save_system=save_system
+)
 midi_teacher = MidiTeacher(midi_path, sheet_music_renderer, save_system=save_system)
 guided_teacher = GuidedTeacher(midi_teacher, synth, save_system=save_system)
+
 
 def midi_listener():
     try:
@@ -180,8 +213,16 @@ def midi_listener():
                         if synth_enabled:
                             synth.pedal_cc(msg.control, msg.value)
 
+
 def run():
-    global teaching_mode, guided_mode, synth_enabled, midi_teacher, guided_teacher, all_midi_events, pressed_notes_set
+    global \
+        teaching_mode, \
+        guided_mode, \
+        synth_enabled, \
+        midi_teacher, \
+        guided_teacher, \
+        all_midi_events, \
+        pressed_notes_set
 
     running = True
     while running:
@@ -191,7 +232,8 @@ def run():
         all_midi_events.clear()
         for event in events:
             if event.type == pygame.QUIT or (
-                event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
+                event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE
+            ):
                 running = False
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_s:
@@ -261,7 +303,9 @@ def run():
                         idx = 0
 
                     mods = pygame.key.get_mods()
-                    if event.button == 1 and not (mods & (pygame.KMOD_SHIFT | pygame.KMOD_CTRL)):
+                    if event.button == 1 and not (
+                        mods & (pygame.KMOD_SHIFT | pygame.KMOD_CTRL)
+                    ):
                         midi_teacher.seek_to_progress(rel)
                     elif event.button == 1 and (mods & pygame.KMOD_SHIFT):
                         # shift+left-click: set loop start
@@ -289,6 +333,7 @@ def run():
         render()
         clock.tick(60)
 
+
 def main():
     midi_thread = threading.Thread(target=midi_listener, daemon=True)
     midi_thread.start()
@@ -297,6 +342,7 @@ def main():
 
     pygame.quit()
     synth.delete()
+
 
 if __name__ == "__main__":
     main()

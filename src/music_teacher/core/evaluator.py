@@ -6,8 +6,13 @@ from mido import MidiTrack
 from scipy.optimize import linear_sum_assignment
 
 from ..utils.data_types import (
-    Note, PedalEvent, NoteEvaluation, Issue, HandIssueSummary,
-    PerformanceEvaluation, articulation_type
+    Note,
+    PedalEvent,
+    NoteEvaluation,
+    Issue,
+    HandIssueSummary,
+    PerformanceEvaluation,
+    articulation_type,
 )
 from ..utils.midi_utils import extract_notes_and_pedal
 
@@ -21,7 +26,10 @@ weights = {
 }
 assert abs(sum(weights.values()) - 1.0) < 1e-9, "Weights must sum to 1.0"
 
-def _match_notes(ref_notes: list[Note], rec_notes: list[Note]) -> tuple[list[tuple[Note, Optional[Note]]], list[Note], float]:
+
+def _match_notes(
+    ref_notes: list[Note], rec_notes: list[Note]
+) -> tuple[list[tuple[Note, Optional[Note]]], list[Note], float]:
     if not ref_notes:
         return [], rec_notes.copy(), 1.0
     if not rec_notes:
@@ -49,6 +57,7 @@ def _match_notes(ref_notes: list[Note], rec_notes: list[Note]) -> tuple[list[tup
         ]
 
     onset_w, pitch_w, dur_w, k = 0.001, 3.0, 0.05, 15.0
+
     def weighted_distance(a, b):
         if a is None or b is None:
             return k
@@ -88,7 +97,12 @@ def _detect_articulation(duration: float, reference_duration: int) -> articulati
         return "legato"
     return "normal"
 
-def _evaluate_pedal_use(ref_pedals: list[PedalEvent], rec_pedals: list[PedalEvent], evaluation: PerformanceEvaluation):
+
+def _evaluate_pedal_use(
+    ref_pedals: list[PedalEvent],
+    rec_pedals: list[PedalEvent],
+    evaluation: PerformanceEvaluation,
+):
     ref_by_type = defaultdict(list)
     rec_by_type = defaultdict(list)
     for p in ref_pedals:
@@ -113,7 +127,7 @@ def _evaluate_pedal_use(ref_pedals: list[PedalEvent], rec_pedals: list[PedalEven
 
         for tag, i1, i2, j1, j2 in opcodes:
             if tag == "equal":
-                correct += (i2 - i1)
+                correct += i2 - i1
             elif tag == "replace":
                 for k in range(max(i2 - i1, j2 - j1)):
                     ref_idx = i1 + k if i1 + k < i2 else None
@@ -123,46 +137,56 @@ def _evaluate_pedal_use(ref_pedals: list[PedalEvent], rec_pedals: list[PedalEven
                     if ref_event and rec_event:
                         time_diff = abs(rec_event.time_ms - ref_event.time_ms)
                         value_diff = abs(rec_event.value - ref_event.value)
-                        evaluation.issues.append(Issue(
-                            time_ms=rec_event.time_ms,
-                            severity=min((time_diff / 300 + value_diff / 127), 1.0),
-                            category="pedal",
-                            description=f"{pt} pedal mismatch: time {time_diff} ms, value {value_diff}"
-                        ))
+                        evaluation.issues.append(
+                            Issue(
+                                time_ms=rec_event.time_ms,
+                                severity=min((time_diff / 300 + value_diff / 127), 1.0),
+                                category="pedal",
+                                description=f"{pt} pedal mismatch: time {time_diff} ms, value {value_diff}",
+                            )
+                        )
                     elif ref_event:
-                        evaluation.issues.append(Issue(
-                            time_ms=ref_event.time_ms,
-                            severity=1.0,
-                            category="pedal",
-                            description=f"Missing {pt} pedal event"
-                        ))
+                        evaluation.issues.append(
+                            Issue(
+                                time_ms=ref_event.time_ms,
+                                severity=1.0,
+                                category="pedal",
+                                description=f"Missing {pt} pedal event",
+                            )
+                        )
                     elif rec_event:
-                        evaluation.issues.append(Issue(
-                            time_ms=rec_event.time_ms,
-                            severity=0.7,
-                            category="pedal",
-                            description=f"Extra {pt} pedal event"
-                        ))
+                        evaluation.issues.append(
+                            Issue(
+                                time_ms=rec_event.time_ms,
+                                severity=0.7,
+                                category="pedal",
+                                description=f"Extra {pt} pedal event",
+                            )
+                        )
                     issues += 1
             elif tag == "delete":
                 for k in range(i1, i2):
                     ref_event = ref_events[k]
-                    evaluation.issues.append(Issue(
-                        time_ms=ref_event.time_ms,
-                        severity=1.0,
-                        category="pedal",
-                        description=f"Missing {pt} pedal event"
-                    ))
+                    evaluation.issues.append(
+                        Issue(
+                            time_ms=ref_event.time_ms,
+                            severity=1.0,
+                            category="pedal",
+                            description=f"Missing {pt} pedal event",
+                        )
+                    )
                     issues += 1
             elif tag == "insert":
                 for k in range(j1, j2):
                     rec_event = rec_events[k]
-                    evaluation.issues.append(Issue(
-                        time_ms=rec_event.time_ms,
-                        severity=0.7,
-                        category="pedal",
-                        description=f"Extra {pt} pedal event"
-                    ))
+                    evaluation.issues.append(
+                        Issue(
+                            time_ms=rec_event.time_ms,
+                            severity=0.7,
+                            category="pedal",
+                            description=f"Extra {pt} pedal event",
+                        )
+                    )
                     issues += 1
 
     if total > 0:
@@ -170,8 +194,9 @@ def _evaluate_pedal_use(ref_pedals: list[PedalEvent], rec_pedals: list[PedalEven
     else:
         evaluation.pedal_score = 1.0
 
+
 def _pitch_to_name(pitch: int) -> str:
-    names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+    names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
     octave = (pitch // 12) - 1
     name = names[pitch % 12]
     return f"{name}{octave}"
@@ -182,13 +207,28 @@ def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
 
     if ev.tempo_deviation_ratio < 0.95:
         percent = (1.0 - ev.tempo_deviation_ratio) * 100
-        tips.append((f"You are playing too slow ({percent:.1f}% slower than reference). Try increasing your tempo a bit!", (1.0 - ev.tempo_deviation_ratio) * weights.get("tempo", 1.0) * 10))
+        tips.append(
+            (
+                f"You are playing too slow ({percent:.1f}% slower than reference). Try increasing your tempo a bit!",
+                (1.0 - ev.tempo_deviation_ratio) * weights.get("tempo", 1.0) * 10,
+            )
+        )
     elif ev.tempo_deviation_ratio > 1.05:
         percent = (ev.tempo_deviation_ratio - 1.0) * 100
-        tips.append((f"You are playing too fast ({percent:.1f}% faster than reference). Slow down slightly to match the reference.", (ev.tempo_deviation_ratio - 1.0) * weights.get("tempo", 1.0) * 10))
+        tips.append(
+            (
+                f"You are playing too fast ({percent:.1f}% faster than reference). Slow down slightly to match the reference.",
+                (ev.tempo_deviation_ratio - 1.0) * weights.get("tempo", 1.0) * 10,
+            )
+        )
     elif abs(ev.tempo_deviation_ratio - 1.0) > 0.01:
         percent = (ev.tempo_deviation_ratio - 1.0) * 100
-        tips.append((f"Adjust your tempo slightly to match the reference (off by {percent:.1f}%).", abs(ev.tempo_deviation_ratio - 1.0) * weights.get("tempo", 1.0) * 10))
+        tips.append(
+            (
+                f"Adjust your tempo slightly to match the reference (off by {percent:.1f}%).",
+                abs(ev.tempo_deviation_ratio - 1.0) * weights.get("tempo", 1.0) * 10,
+            )
+        )
 
     if ev.accuracy_score < 0.85:
         wrong_notes = [i for i in ev.issues if i.category == "accuracy"]
@@ -200,10 +240,17 @@ def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
         msg = f"You missed quite a few notes{loc_str} ({ev.wrong_notes + ev.missing_notes} total). Focus on accuracy first."
         tips.append((msg, (1.0 - ev.accuracy_score) * weights.get("accuracy", 1.0)))
     elif ev.accuracy_score < 1.0:
-        tips.append(("To reach perfection, double-check each note for accuracy.", 0.5 * (1.0 - ev.accuracy_score) * weights.get("accuracy", 1.0)))
+        tips.append(
+            (
+                "To reach perfection, double-check each note for accuracy.",
+                0.5 * (1.0 - ev.accuracy_score) * weights.get("accuracy", 1.0),
+            )
+        )
 
     if ev.extra_notes > 0:
-        extra_notes = [i for i in ev.issues if i.category == "accuracy" and i.severity < 1.0]
+        extra_notes = [
+            i for i in ev.issues if i.category == "accuracy" and i.severity < 1.0
+        ]
         locations = [f"index {idx}" for idx, i in enumerate(extra_notes[:3])]
         if locations:
             loc_str = " at " + ", ".join(locations)
@@ -213,7 +260,9 @@ def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
         tips.append((msg, 0.5 * weights.get("accuracy", 1.0)))
 
     if ev.missing_notes > 0:
-        missing_notes = [i for i in ev.issues if i.category == "accuracy" and i.severity == 1.0]
+        missing_notes = [
+            i for i in ev.issues if i.category == "accuracy" and i.severity == 1.0
+        ]
         locations = [f"index {idx}" for idx, i in enumerate(missing_notes[:3])]
         if locations:
             loc_str = " at " + ", ".join(locations)
@@ -229,12 +278,22 @@ def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
             loc_str = " at " + ", ".join(locations)
         else:
             loc_str = ""
-        msg = f"Your timing is off{loc_str} (average deviation {ev.avg_timing_deviation_ms/1000:.2f} s). Practice with a metronome."
+        msg = f"Your timing is off{loc_str} (average deviation {ev.avg_timing_deviation_ms / 1000:.2f} s). Practice with a metronome."
         tips.append((msg, (1.0 - ev.timing_score) * weights.get("timing", 1.0)))
     elif ev.rhythmic_stability > 50:
-        tips.append((f"Your rhythm fluctuates (stability {ev.rhythmic_stability:.1f}). Try keeping a steadier beat.", min(ev.rhythmic_stability / 200, 1.0) * weights.get("timing", 1.0)))
+        tips.append(
+            (
+                f"Your rhythm fluctuates (stability {ev.rhythmic_stability:.1f}). Try keeping a steadier beat.",
+                min(ev.rhythmic_stability / 200, 1.0) * weights.get("timing", 1.0),
+            )
+        )
     elif ev.timing_score < 1.0:
-        tips.append(("To reach perfection, refine your microtiming for each note.", 0.5 * (1.0 - ev.timing_score) * weights.get("timing", 1.0)))
+        tips.append(
+            (
+                "To reach perfection, refine your microtiming for each note.",
+                0.5 * (1.0 - ev.timing_score) * weights.get("timing", 1.0),
+            )
+        )
 
     if ev.dynamics_score < 0.85:
         dynamic_issues = [n for n in ev.notes if abs(n.velocity_deviation) > 10]
@@ -246,20 +305,42 @@ def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
         msg = f"Your dynamics are uneven{loc_str}. Try to control volume more consistently."
         tips.append((msg, (1.0 - ev.dynamics_score) * weights.get("dynamics", 1.0)))
     elif ev.dynamics_score < 1.0:
-        tips.append(("To reach perfection, make your dynamics perfectly balanced.", 0.5 * (1.0 - ev.dynamics_score) * weights.get("dynamics", 1.0)))
+        tips.append(
+            (
+                "To reach perfection, make your dynamics perfectly balanced.",
+                0.5 * (1.0 - ev.dynamics_score) * weights.get("dynamics", 1.0),
+            )
+        )
 
     num_staccato = sum(1 for n in ev.notes if n.articulation == "staccato")
     num_legato = sum(1 for n in ev.notes if n.articulation == "legato")
-    articulation_issues = [n for n in ev.notes if n.articulation and n.articulation != "normal"]
+    articulation_issues = [
+        n for n in ev.notes if n.articulation and n.articulation != "normal"
+    ]
 
     if num_staccato > len(ev.notes) * 0.3:
-        tips.append(("You are playing too staccato. Hold the notes longer for smoother phrasing.",
-                     (num_staccato / len(ev.notes)) * weights.get("articulation", 1.0)))
+        tips.append(
+            (
+                "You are playing too staccato. Hold the notes longer for smoother phrasing.",
+                (num_staccato / len(ev.notes)) * weights.get("articulation", 1.0),
+            )
+        )
     elif num_legato > len(ev.notes) * 0.3:
-        tips.append(("You are playing too legato. Try separating the notes a bit more.",
-                     (num_legato / len(ev.notes)) * weights.get("articulation", 1.0)))
+        tips.append(
+            (
+                "You are playing too legato. Try separating the notes a bit more.",
+                (num_legato / len(ev.notes)) * weights.get("articulation", 1.0),
+            )
+        )
     elif num_staccato + num_legato > 0:
-        tips.append(("To reach perfection, refine your articulation to match the reference.", 0.5 * ((num_staccato + num_legato) / len(ev.notes)) * weights.get("articulation", 1.0)))
+        tips.append(
+            (
+                "To reach perfection, refine your articulation to match the reference.",
+                0.5
+                * ((num_staccato + num_legato) / len(ev.notes))
+                * weights.get("articulation", 1.0),
+            )
+        )
 
     if articulation_issues:
         locations = [f"index {idx}" for idx, n in enumerate(articulation_issues[:3])]
@@ -268,7 +349,13 @@ def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
         else:
             loc_str = ""
         msg = f"Refine articulation to match the reference{loc_str}."
-        tips.append((msg, (sum(1 for _ in articulation_issues)/len(ev.notes)) * weights.get("articulation", 1.0)))
+        tips.append(
+            (
+                msg,
+                (sum(1 for _ in articulation_issues) / len(ev.notes))
+                * weights.get("articulation", 1.0),
+            )
+        )
 
     if ev.pedal_score < 0.8:
         pedal_issues = [i for i in ev.issues if i.category == "pedal"]
@@ -280,15 +367,30 @@ def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
         msg = f"Your pedal usage needs improvement{loc_str}. Listen carefully to the pedal changes in the reference."
         tips.append((msg, (1.0 - ev.pedal_score) * weights.get("pedal", 1.0)))
     elif ev.pedal_score < 1.0:
-        tips.append(("To reach perfection, perfect your pedal timing and depth.", 0.5 * (1.0 - ev.pedal_score) * weights.get("pedal", 1.0)))
+        tips.append(
+            (
+                "To reach perfection, perfect your pedal timing and depth.",
+                0.5 * (1.0 - ev.pedal_score) * weights.get("pedal", 1.0),
+            )
+        )
 
     rh_issues = ev.hand_summary.get("rh", HandIssueSummary())
     lh_issues = ev.hand_summary.get("lh", HandIssueSummary())
     if rh_issues.total_issues > 0 and lh_issues.total_issues > 0:
         if rh_issues.total_issues > lh_issues.total_issues * 1.5:
-            tips.append(("Your right hand seems to have more mistakes. Focus on right-hand passages.", 0))
+            tips.append(
+                (
+                    "Your right hand seems to have more mistakes. Focus on right-hand passages.",
+                    0,
+                )
+            )
         elif lh_issues.total_issues > rh_issues.total_issues * 1.5:
-            tips.append(("Your left hand seems to struggle more. Slow down left-hand parts for clarity.", 0))
+            tips.append(
+                (
+                    "Your left hand seems to struggle more. Slow down left-hand parts for clarity.",
+                    0,
+                )
+            )
 
     if ev.overall_score == 1.0:
         encouragement = "Perfect performance! You don't need this anymore. Just practice on your own and bring in your emotions."
@@ -306,7 +408,9 @@ def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
 
 
 class Evaluator:
-    def __init__(self, recording: MidiTrack, reference: tuple[list[Note], list[PedalEvent]]):
+    def __init__(
+        self, recording: MidiTrack, reference: tuple[list[Note], list[PedalEvent]]
+    ):
         self.recording: MidiTrack = recording
         self.reference: tuple[list[Note], list[PedalEvent]] = reference
         self._evaluation: Optional[PerformanceEvaluation] = None
@@ -327,7 +431,11 @@ class Evaluator:
         encouragement = ""
         if not evaluation.comments:
             evaluation.comments, encouragement = _generate_tips(evaluation)
-        return encouragement + str(evaluation.comments[0]) if evaluation.comments else encouragement.strip() or "Perfect performance!"
+        return (
+            encouragement + str(evaluation.comments[0])
+            if evaluation.comments
+            else encouragement.strip() or "Perfect performance!"
+        )
 
     def _evaluate(self):
         rec_notes, rec_pedals = extract_notes_and_pedal(self.recording)
@@ -340,21 +448,27 @@ class Evaluator:
         tempo_dev = abs(1.0 - tempo_ratio)
         evaluation.tempo_accuracy_score = max(0.0, 1.0 - tempo_dev)
 
-        hand_stats = {"rh": HandIssueSummary(), "lh": HandIssueSummary(), "unknown": HandIssueSummary()}
+        hand_stats = {
+            "rh": HandIssueSummary(),
+            "lh": HandIssueSummary(),
+            "unknown": HandIssueSummary(),
+        }
 
         for r, played in matches:
             hand = r.mark or "unknown"
 
             if played is None:
                 evaluation.missing_notes += 1
-                evaluation.notes.append(NoteEvaluation(
-                    pitch_correct=False,
-                    time_ms=r.onset_ms,
-                    comments="Note missing"
-                ))
+                evaluation.notes.append(
+                    NoteEvaluation(
+                        pitch_correct=False, time_ms=r.onset_ms, comments="Note missing"
+                    )
+                )
                 issue = Issue(
-                    time_ms=r.onset_ms, severity=1.0,
-                    category="accuracy", description=f"Missing note {_pitch_to_name(r.pitch)}"
+                    time_ms=r.onset_ms,
+                    severity=1.0,
+                    category="accuracy",
+                    description=f"Missing note {_pitch_to_name(r.pitch)}",
                 )
                 evaluation.issues.append(issue)
                 hand_stats[hand].total_issues += 1
@@ -366,7 +480,9 @@ class Evaluator:
             onset_dev = played.onset_ms - r.onset_ms
             dur_dev = (played.duration_ms / (tempo_ratio + 1e-6)) - r.duration_ms
             vel_dev = played.velocity - r.velocity
-            articulation = _detect_articulation(played.duration_ms / tempo_ratio, r.duration_ms)
+            articulation = _detect_articulation(
+                played.duration_ms / tempo_ratio, r.duration_ms
+            )
 
             note_eval = NoteEvaluation(
                 pitch_correct=pitch_correct,
@@ -381,9 +497,11 @@ class Evaluator:
 
             if not pitch_correct:
                 issue = Issue(
-                    time_ms=played.onset_ms, note=played.pitch,
-                    severity=min(abs(pitch_error)/12, 1.0),
-                    category="accuracy", description=f"Wrong pitch {_pitch_to_name(played.pitch)} vs {_pitch_to_name(r.pitch)}"
+                    time_ms=played.onset_ms,
+                    note=played.pitch,
+                    severity=min(abs(pitch_error) / 12, 1.0),
+                    category="accuracy",
+                    description=f"Wrong pitch {_pitch_to_name(played.pitch)} vs {_pitch_to_name(r.pitch)}",
                 )
                 evaluation.issues.append(issue)
                 evaluation.wrong_notes += 1
@@ -394,9 +512,11 @@ class Evaluator:
 
             if abs(onset_dev) > 30:
                 issue = Issue(
-                    time_ms=played.onset_ms, note=played.pitch,
-                    severity=min(abs(onset_dev)/200, 1.0),
-                    category="timing", description=f"Timing off by {onset_dev:.1f} ms"
+                    time_ms=played.onset_ms,
+                    note=played.pitch,
+                    severity=min(abs(onset_dev) / 200, 1.0),
+                    category="timing",
+                    description=f"Timing off by {onset_dev:.1f} ms",
                 )
                 evaluation.issues.append(issue)
                 hand_stats[hand].total_issues += 1
@@ -404,9 +524,11 @@ class Evaluator:
 
             if articulation != "normal":
                 issue = Issue(
-                    time_ms=played.onset_ms, note=played.pitch,
-                    severity=0.5, category="articulation",
-                    description=f"Played {articulation}"
+                    time_ms=played.onset_ms,
+                    note=played.pitch,
+                    severity=0.5,
+                    category="articulation",
+                    description=f"Played {articulation}",
                 )
                 evaluation.issues.append(issue)
                 hand_stats[hand].total_issues += 1
@@ -414,42 +536,76 @@ class Evaluator:
 
         evaluation.extra_notes = len(extras)
         for n in extras:
-            evaluation.issues.append(Issue(
-                time_ms=n.onset_ms, note=n.pitch,
-                severity=0.5, category="accuracy",
-                description=f"Extra note {n.pitch}"
-            ))
+            evaluation.issues.append(
+                Issue(
+                    time_ms=n.onset_ms,
+                    note=n.pitch,
+                    severity=0.5,
+                    category="accuracy",
+                    description=f"Extra note {n.pitch}",
+                )
+            )
 
         if evaluation.notes:
-            evaluation.avg_timing_deviation_ms = float(np.mean([abs(n.onset_deviation_ms) for n in evaluation.notes]))
-            evaluation.avg_duration_deviation_ms = float(np.mean([abs(n.duration_deviation_ms) for n in evaluation.notes]))
-            evaluation.avg_velocity_deviation = float(np.mean([abs(n.velocity_deviation) for n in evaluation.notes]))
+            evaluation.avg_timing_deviation_ms = float(
+                np.mean([abs(n.onset_deviation_ms) for n in evaluation.notes])
+            )
+            evaluation.avg_duration_deviation_ms = float(
+                np.mean([abs(n.duration_deviation_ms) for n in evaluation.notes])
+            )
+            evaluation.avg_velocity_deviation = float(
+                np.mean([abs(n.velocity_deviation) for n in evaluation.notes])
+            )
 
         deviations = [n.onset_deviation_ms for n in evaluation.notes]
-        evaluation.rhythmic_stability = float(np.std(deviations)) if len(deviations) > 1 else 0.0
+        evaluation.rhythmic_stability = (
+            float(np.std(deviations)) if len(deviations) > 1 else 0.0
+        )
         evaluation.tempo_consistency = 1.0 / (1.0 + evaluation.rhythmic_stability)
 
         _evaluate_pedal_use(ref_pedals, rec_pedals, evaluation)
 
-        evaluation.accuracy_score = evaluation.correct_notes / max(1, evaluation.total_notes)
-        evaluation.timing_score = max(0.0, 1.0 - evaluation.avg_timing_deviation_ms / 200.0)
-        evaluation.dynamics_score = max(0.0, 1.0 - evaluation.avg_velocity_deviation / 40.0)
-        evaluation.articulation_score = 1.0 - sum(1 for i in evaluation.issues if i.category == "articulation") / max(1, evaluation.total_notes)
+        evaluation.accuracy_score = evaluation.correct_notes / max(
+            1, evaluation.total_notes
+        )
+        evaluation.timing_score = max(
+            0.0, 1.0 - evaluation.avg_timing_deviation_ms / 200.0
+        )
+        evaluation.dynamics_score = max(
+            0.0, 1.0 - evaluation.avg_velocity_deviation / 40.0
+        )
+        evaluation.articulation_score = 1.0 - sum(
+            1 for i in evaluation.issues if i.category == "articulation"
+        ) / max(1, evaluation.total_notes)
 
         evaluation.overall_score = (
-            weights["accuracy"] * evaluation.accuracy_score +
-            weights["timing"] * evaluation.timing_score +
-            weights["dynamics"] * evaluation.dynamics_score +
-            weights["articulation"] * evaluation.articulation_score +
-            weights["pedal"] * evaluation.pedal_score +
-            weights["tempo"] * evaluation.tempo_accuracy_score
+            weights["accuracy"] * evaluation.accuracy_score
+            + weights["timing"] * evaluation.timing_score
+            + weights["dynamics"] * evaluation.dynamics_score
+            + weights["articulation"] * evaluation.articulation_score
+            + weights["pedal"] * evaluation.pedal_score
+            + weights["tempo"] * evaluation.tempo_accuracy_score
         )
 
         for hand, summary in hand_stats.items():
             if summary.total_issues:
-                severities = [i.severity for i in evaluation.issues if (hand == "unknown" or any(
-                    (r.mark == hand and (r.pitch == i.note or abs(r.onset_ms - i.time_ms) < 50))
-                    for r, _ in matches))]
+                severities = [
+                    i.severity
+                    for i in evaluation.issues
+                    if (
+                        hand == "unknown"
+                        or any(
+                            (
+                                r.mark == hand
+                                and (
+                                    r.pitch == i.note
+                                    or abs(r.onset_ms - i.time_ms) < 50
+                                )
+                            )
+                            for r, _ in matches
+                        )
+                    )
+                ]
                 summary.avg_severity = float(np.mean(severities)) if severities else 0.0
 
         evaluation.hand_summary = hand_stats

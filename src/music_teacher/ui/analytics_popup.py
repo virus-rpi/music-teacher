@@ -11,28 +11,40 @@ from ..utils.data_types import PerformanceEvaluation
 from .flexbox import FlexBox
 from ..utils.save_system import SaveSystem
 
-matplotlib.use('Agg')
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pygame_gui
 
 # TODO: let user playback correct vs recorded midi to hear the difference
 # TODO: add toggle for relative or absolute timing in the piano roll (separate or merged x normalization)
 
+
 def _render_background(surface):
-    pygame.draw.rect(surface, (30, 30, 30), (0, 0, surface.get_width(), surface.get_height()), border_radius=16)
-    pygame.draw.rect(surface, (200, 200, 200), (0, 0, surface.get_width(), surface.get_height()), 2, border_radius=16)
+    pygame.draw.rect(
+        surface,
+        (30, 30, 30),
+        (0, 0, surface.get_width(), surface.get_height()),
+        border_radius=16,
+    )
+    pygame.draw.rect(
+        surface,
+        (200, 200, 200),
+        (0, 0, surface.get_width(), surface.get_height()),
+        2,
+        border_radius=16,
+    )
 
 
 def _generate_tips(evaluation: PerformanceEvaluation) -> pygame_gui.elements.UITextBox:
     if not evaluation or not evaluation.comments:
         return pygame_gui.elements.UITextBox(
-            html_text='<i>No analytics available.</i>',
+            html_text="<i>No analytics available.</i>",
             relative_rect=pygame.Rect(0, 0, 100, 10),
         )
 
-    tips_html = '<b>Performance Analysis & Technique Tips:</b><br/>'
+    tips_html = "<b>Performance Analysis & Technique Tips:</b><br/>"
     for comment in evaluation.comments:
-        tips_html += f'{comment}\n'
+        tips_html += f"{comment}\n"
 
     # TODO: add concrete techniques
 
@@ -53,7 +65,9 @@ def _render_overall_score(evaluation: PerformanceEvaluation, big_font, flex_box)
     flex_box.place_element(
         pygame_gui.elements.UIImage(
             image_surface=score_surf,
-            relative_rect=pygame.Rect(0, 0, score_surf.get_width(), score_surf.get_height()),
+            relative_rect=pygame.Rect(
+                0, 0, score_surf.get_width(), score_surf.get_height()
+            ),
         ),
         height_px=score_surf.get_height(),
         width_px=score_surf.get_width(),
@@ -61,36 +75,40 @@ def _render_overall_score(evaluation: PerformanceEvaluation, big_font, flex_box)
 
 
 def _matplotlib_spider_chart(evaluation: PerformanceEvaluation, width, height):
-    labels = np.array(['Accuracy', 'Timing', 'Dynamics', 'Articulation', 'Pedal', 'Tempo'])
-    values = np.array([
-        evaluation.accuracy_score,
-        evaluation.timing_score,
-        evaluation.dynamics_score,
-        evaluation.articulation_score,
-        evaluation.pedal_score,
-        evaluation.tempo_accuracy_score
-    ])
+    labels = np.array(
+        ["Accuracy", "Timing", "Dynamics", "Articulation", "Pedal", "Tempo"]
+    )
+    values = np.array(
+        [
+            evaluation.accuracy_score,
+            evaluation.timing_score,
+            evaluation.dynamics_score,
+            evaluation.articulation_score,
+            evaluation.pedal_score,
+            evaluation.tempo_accuracy_score,
+        ]
+    )
     values = np.append(values, values[0])
     angles = np.linspace(0, 2 * np.pi, len(labels), endpoint=False)
     angles = np.append(angles, angles[0])
     fig = plt.figure(figsize=(width / 100, height / 100), dpi=100)
     ax = fig.add_subplot(111, polar=True)
-    ax.plot(angles, values, 'o-', linewidth=2, color='#50c878')
-    ax.fill(angles, values, alpha=0.25, color='#50c878')
+    ax.plot(angles, values, "o-", linewidth=2, color="#50c878")
+    ax.fill(angles, values, alpha=0.25, color="#50c878")
     ax.set_ylim(0, 1)
-    ax.set_title('Performance Metrics', y=1.1, color='white')
-    ax.grid(True, color='white', alpha=0.3)
-    ax.tick_params(colors='white')
+    ax.set_title("Performance Metrics", y=1.1, color="white")
+    ax.grid(True, color="white", alpha=0.3)
+    ax.tick_params(colors="white")
     ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(labels, color='white', fontsize=10)
+    ax.set_xticklabels(labels, color="white", fontsize=10)
     fig.patch.set_alpha(0)
     ax.set_facecolor((0, 0, 0, 0))
     plt.tight_layout()
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', transparent=True)
+    plt.savefig(buf, format="png", transparent=True)
     plt.close(fig)
     buf.seek(0)
-    img = pygame.image.load(buf, 'spider_chart.png').convert_alpha()
+    img = pygame.image.load(buf, "spider_chart.png").convert_alpha()
     return img
 
 
@@ -100,7 +118,7 @@ class UIManagerWithOffset(pygame_gui.UIManager):
         self.offset: tuple[int, int] = offset
 
     def calculate_scaled_mouse_position(
-            self, position: tuple[int, int]
+        self, position: tuple[int, int]
     ) -> tuple[int, int]:
         return (
             int(self.mouse_pos_scale_factor[0] * position[0]) - self.offset[0],
@@ -118,7 +136,9 @@ class ElementSurface:
         self.height = int(surface.get_height() * 0.85)
         self.x = (surface.get_width() - self.width) // 2
         self.y = (surface.get_height() - self.height) // 4
-        self.surface: pygame.Surface = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+        self.surface: pygame.Surface = pygame.Surface(
+            (self.width, self.height), pygame.SRCALPHA
+        )
 
     def __enter__(self):
         return self.surface, (self.x, self.y), (self.width, self.height)
@@ -134,9 +154,9 @@ class AnalyticsPopup:
         self.visible = False
 
         self._margin = 32
-        self._font = pygame.font.SysFont('Arial', 22)
-        self._small_font = pygame.font.SysFont('Arial', 18)
-        self._big_font = pygame.font.SysFont('Arial', 28, bold=True)
+        self._font = pygame.font.SysFont("Arial", 22)
+        self._small_font = pygame.font.SysFont("Arial", 18)
+        self._big_font = pygame.font.SysFont("Arial", 28, bold=True)
 
         self._ui_manager = UIManagerWithOffset((800, 600), (0, 0))
 
@@ -155,7 +175,22 @@ class AnalyticsPopup:
 
         self._evaluation: PerformanceEvaluation | None = None
 
-        self._ui_manager.preload_fonts([{'name': 'noto_sans', 'point_size': 14, 'style': 'italic', 'antialiased': '1'}, {'name': 'noto_sans', 'point_size': 14, 'style': 'bold', 'antialiased': '1'}])
+        self._ui_manager.preload_fonts(
+            [
+                {
+                    "name": "noto_sans",
+                    "point_size": 14,
+                    "style": "italic",
+                    "antialiased": "1",
+                },
+                {
+                    "name": "noto_sans",
+                    "point_size": 14,
+                    "style": "bold",
+                    "antialiased": "1",
+                },
+            ]
+        )
 
     def toggle(self):
         self.visible = not self.visible
@@ -174,12 +209,23 @@ class AnalyticsPopup:
             _render_background(e)
 
             if not self._main_container:
-                self._main_container = FlexBox(manager=self._ui_manager,
-                                               relative_rect=pygame.Rect(0, 0, dims[0], dims[1]), gap=12, padding=self._margin)
+                self._main_container = FlexBox(
+                    manager=self._ui_manager,
+                    relative_rect=pygame.Rect(0, 0, dims[0], dims[1]),
+                    gap=12,
+                    padding=self._margin,
+                )
 
-                left_side = FlexBox(manager=self._ui_manager, relative_rect=pygame.Rect(0, 0, 0, 0), gap=12,
-                                    align_y="start", direction="vertical")
-                self._main_container.place_element(left_side, width_percent=0.6, height_percent=1)
+                left_side = FlexBox(
+                    manager=self._ui_manager,
+                    relative_rect=pygame.Rect(0, 0, 0, 0),
+                    gap=12,
+                    align_y="start",
+                    direction="vertical",
+                )
+                self._main_container.place_element(
+                    left_side, width_percent=0.6, height_percent=1
+                )
                 self._render_title(left_side)
                 _render_overall_score(self._evaluation, self._big_font, left_side)
 
@@ -188,12 +234,23 @@ class AnalyticsPopup:
                         image_surface=pygame.Surface((100, 100), pygame.SRCALPHA),
                         relative_rect=pygame.Rect(0, 0, 100, 100),
                     )
-                    left_side.place_element(radar_chart, width_percent=1, height_percent="max")
+                    left_side.place_element(
+                        radar_chart, width_percent=1, height_percent="max"
+                    )
                     self._render_pianoroll(left_side)
-                    radar_chart.set_image(_matplotlib_spider_chart(self._evaluation, radar_chart.relative_rect[2],
-                                                                   radar_chart.relative_rect[3]))
+                    radar_chart.set_image(
+                        _matplotlib_spider_chart(
+                            self._evaluation,
+                            radar_chart.relative_rect[2],
+                            radar_chart.relative_rect[3],
+                        )
+                    )
 
-                self._main_container.place_element(_generate_tips(self._evaluation), width_percent="max", height_percent=1)
+                self._main_container.place_element(
+                    _generate_tips(self._evaluation),
+                    width_percent="max",
+                    height_percent=1,
+                )
 
             now = pygame.time.get_ticks()
             dt = max(0, now - self._last_update_ms) / 1000.0
@@ -222,43 +279,76 @@ class AnalyticsPopup:
 
         self._ui_manager.process_events(event)
 
-        if event.type == pygame.USEREVENT and event.user_type == pygame_gui.UI_DROP_DOWN_MENU_CHANGED:
+        if (
+            event.type == pygame.USEREVENT
+            and event.user_type == pygame_gui.UI_DROP_DOWN_MENU_CHANGED
+        ):
             if event.ui_element == self._measure_selector:
                 selected = self._measure_selector.selected_option[0]
-                m = re.match(r'Measure (\d+)', selected)
+                m = re.match(r"Measure (\d+)", selected)
                 if m:
                     self._selected_measure = int(m.group(1))
                     sections = sorted(self.pass_map[self._selected_measure].keys())
                     self._selected_section = sections[0] if sections else None
-                    passes = list(self.pass_map[self._selected_measure][
-                                      self._selected_section].keys()) if self._selected_section is not None else []
+                    passes = (
+                        list(
+                            self.pass_map[self._selected_measure][
+                                self._selected_section
+                            ].keys()
+                        )
+                        if self._selected_section is not None
+                        else []
+                    )
                     self._selected_pass = passes[0] if passes else None
                     self._update()
             elif event.ui_element == self._section_selector:
                 selected = self._section_selector.selected_option[0]
-                s = re.match(r'Section (\w+|\d+)', selected)
+                s = re.match(r"Section (\w+|\d+)", selected)
                 if s:
                     self._selected_section = s.group(1)
-                    passes = list(self.pass_map[self._selected_measure][
-                                      self._selected_section].keys()) if self._selected_measure is not None and self._selected_section is not None else []
+                    passes = (
+                        list(
+                            self.pass_map[self._selected_measure][
+                                self._selected_section
+                            ].keys()
+                        )
+                        if self._selected_measure is not None
+                        and self._selected_section is not None
+                        else []
+                    )
                     self._selected_pass = passes[0] if passes else None
                     self._update()
             elif event.ui_element == self._pass_selector:
                 selected = self._pass_selector.selected_option[0]
-                p = re.match(r'Pass (\d+)', selected)
+                p = re.match(r"Pass (\d+)", selected)
                 if p:
                     self._selected_pass = int(p.group(1))
                     self._update()
 
     def _render_title(self, parent):
-        title_surf = self._font.render('Performance Analytics for', True, (255, 255, 255))
-        container = FlexBox(manager=self._ui_manager,
-                            relative_rect=pygame.Rect(self._margin, self._margin, 0, title_surf.get_height()), gap=12)
-        parent.place_element(container, height_px=title_surf.get_height(), width_percent=1)
-        container.place_element(pygame_gui.elements.UIImage(
-            image_surface=title_surf,
-            relative_rect=pygame.Rect(0, 0, title_surf.get_width(), title_surf.get_height()),
-        ), height_px=title_surf.get_height(), width_px=title_surf.get_width())
+        title_surf = self._font.render(
+            "Performance Analytics for", True, (255, 255, 255)
+        )
+        container = FlexBox(
+            manager=self._ui_manager,
+            relative_rect=pygame.Rect(
+                self._margin, self._margin, 0, title_surf.get_height()
+            ),
+            gap=12,
+        )
+        parent.place_element(
+            container, height_px=title_surf.get_height(), width_percent=1
+        )
+        container.place_element(
+            pygame_gui.elements.UIImage(
+                image_surface=title_surf,
+                relative_rect=pygame.Rect(
+                    0, 0, title_surf.get_width(), title_surf.get_height()
+                ),
+            ),
+            height_px=title_surf.get_height(),
+            width_px=title_surf.get_width(),
+        )
         self._render_dropdowns(self._margin + title_surf.get_width() + 12)
 
     def _render_dropdowns(self, x):
@@ -277,36 +367,76 @@ class AnalyticsPopup:
                 relative_rect=pygame.Rect(0, 0, 0, 0),
             )
 
-        measure_options = [f"Measure {m}" for m in sorted(self.pass_map.keys(), key=int)] if self.pass_map else ['—']
-        self._measure_selector = make_dropdown(measure_options,
-                                               f"Measure {self._selected_measure}" if self._selected_measure else
-                                               measure_options[0])
-        section_options = [f"Section {s}" for s in sorted(
-            self.pass_map[self._selected_measure].keys())] if self._selected_measure is not None and self.pass_map.get(
-            self._selected_measure) else ['—']
-        self._section_selector = make_dropdown(section_options,
-                                               f"Section {self._selected_section}" if self._selected_section else
-                                               section_options[0])
-        pass_options = [f"Pass {p}" for p in sorted(self.pass_map[self._selected_measure][
-                                                        self._selected_section].keys())] if self._selected_measure is not None and self._selected_section is not None and self.pass_map.get(
-            self._selected_measure, {}).get(self._selected_section) else ['—']
+        measure_options = (
+            [f"Measure {m}" for m in sorted(self.pass_map.keys(), key=int)]
+            if self.pass_map
+            else ["—"]
+        )
+        self._measure_selector = make_dropdown(
+            measure_options,
+            f"Measure {self._selected_measure}"
+            if self._selected_measure
+            else measure_options[0],
+        )
+        section_options = (
+            [
+                f"Section {s}"
+                for s in sorted(self.pass_map[self._selected_measure].keys())
+            ]
+            if self._selected_measure is not None
+            and self.pass_map.get(self._selected_measure)
+            else ["—"]
+        )
+        self._section_selector = make_dropdown(
+            section_options,
+            f"Section {self._selected_section}"
+            if self._selected_section
+            else section_options[0],
+        )
+        pass_options = (
+            [
+                f"Pass {p}"
+                for p in sorted(
+                    self.pass_map[self._selected_measure][self._selected_section].keys()
+                )
+            ]
+            if self._selected_measure is not None
+            and self._selected_section is not None
+            and self.pass_map.get(self._selected_measure, {}).get(
+                self._selected_section
+            )
+            else ["—"]
+        )
 
-        self._pass_selector = make_dropdown(pass_options,
-                                            f"Pass {self._selected_pass}" if self._selected_pass else pass_options[0])
-        self._dropdown_container.place_element(self._measure_selector, height_percent=1, width_px=200)
-        self._dropdown_container.place_element(self._section_selector, height_percent=1, width_px=220)
-        self._dropdown_container.place_element(self._pass_selector, height_percent=1, width_px=140)
+        self._pass_selector = make_dropdown(
+            pass_options,
+            f"Pass {self._selected_pass}" if self._selected_pass else pass_options[0],
+        )
+        self._dropdown_container.place_element(
+            self._measure_selector, height_percent=1, width_px=200
+        )
+        self._dropdown_container.place_element(
+            self._section_selector, height_percent=1, width_px=220
+        )
+        self._dropdown_container.place_element(
+            self._pass_selector, height_percent=1, width_px=140
+        )
 
     def _build_path_map(self):
         self._selected_measure = None
         self._selected_section = None
         self._selected_pass = None
         self.pass_map = defaultdict(lambda: defaultdict(dict))
-        results = self.save_system.search_index(module="guided_teacher_data", rel_path=['pass_', '.json'],
-                                                sort_by='timestamp', ascending=False, rel_path_match="all")
+        results = self.save_system.search_index(
+            module="guided_teacher_data",
+            rel_path=["pass_", ".json"],
+            sort_by="timestamp",
+            ascending=False,
+            rel_path_match="all",
+        )
         for entry in results:
-            path = entry['rel_path']
-            m = re.search(r'measure_(\d+)/section_(\w+|\d+)/pass_(\d+)\.json', path)
+            path = entry["rel_path"]
+            m = re.search(r"measure_(\d+)/section_(\w+|\d+)/pass_(\d+)\.json", path)
             if m:
                 measure = int(m.group(1))
                 section = str(m.group(2))
@@ -318,15 +448,29 @@ class AnalyticsPopup:
                     self._selected_pass = pass_num
 
     def _get_selected_evaluation(self) -> PerformanceEvaluation:
-        if not (self.pass_map and self.pass_map[self._selected_measure] and self.pass_map[self._selected_measure][
-            self._selected_section] and self.pass_map[self._selected_measure][self._selected_section][
-                    self._selected_pass]):
+        if not (
+            self.pass_map
+            and self.pass_map[self._selected_measure]
+            and self.pass_map[self._selected_measure][self._selected_section]
+            and self.pass_map[self._selected_measure][self._selected_section][
+                self._selected_pass
+            ]
+        ):
             return PerformanceEvaluation()
         with self.save_system.guided_teacher_data as s:
             raw = json.loads(
-                s.load_file(self.pass_map[self._selected_measure][self._selected_section][self._selected_pass]))
-            evaluation = raw.get('evaluation', {})
-            return PerformanceEvaluation(**evaluation) if evaluation else PerformanceEvaluation()
+                s.load_file(
+                    self.pass_map[self._selected_measure][self._selected_section][
+                        self._selected_pass
+                    ]
+                )
+            )
+            evaluation = raw.get("evaluation", {})
+            return (
+                PerformanceEvaluation(**evaluation)
+                if evaluation
+                else PerformanceEvaluation()
+            )
 
     def _render_pianoroll(self, flexbox: FlexBox):
         surface_element = pygame_gui.elements.UIImage(
@@ -334,12 +478,20 @@ class AnalyticsPopup:
             relative_rect=pygame.Rect(0, 0, 100, 100),
         )
         flexbox.place_element(surface_element, width_percent=1, height_percent="max")
-        rect = pygame.Rect(0, 0, surface_element.relative_rect[2]-8, surface_element.relative_rect[3])
-        surface = pygame.Surface((rect.width+8, rect.height), pygame.SRCALPHA)
+        rect = pygame.Rect(
+            0, 0, surface_element.relative_rect[2] - 8, surface_element.relative_rect[3]
+        )
+        surface = pygame.Surface((rect.width + 8, rect.height), pygame.SRCALPHA)
 
         pygame.draw.rect(surface, (20, 20, 20), rect, border_radius=8)
 
-        if (expected_notes := self.teacher.midi_teacher.query_notes_and_pedals(*bounds)[0] if (bounds := self._get_section_bounds()) is not None else None) is None:
+        if (
+            expected_notes := self.teacher.midi_teacher.query_notes_and_pedals(*bounds)[
+                0
+            ]
+            if (bounds := self._get_section_bounds()) is not None
+            else None
+        ) is None:
             return
         performed_midi_msgs = self.teacher.midi_teacher.get_performed_notes_for_measure(
             self._selected_measure, self._selected_section, self._selected_pass
@@ -349,7 +501,11 @@ class AnalyticsPopup:
             return
         all_notes = [note.pitch for note in expected_notes]
         if performed_midi_msgs:
-            all_notes += [msg.note for msg in performed_midi_msgs if msg.type in ("note_on", "note_off")]
+            all_notes += [
+                msg.note
+                for msg in performed_midi_msgs
+                if msg.type in ("note_on", "note_off")
+            ]
         if not all_notes:
             return
 
@@ -360,7 +516,10 @@ class AnalyticsPopup:
         padded_height = padded_bottom - padded_top
         gap_threshold = 8
 
-        slots = [pitch if pitch in used_pitches else None for pitch in range(min(used_pitches), max(used_pitches) + 1)]
+        slots = [
+            pitch if pitch in used_pitches else None
+            for pitch in range(min(used_pitches), max(used_pitches) + 1)
+        ]
         slots_with_merged_gaps = []
         gaps = []
         i = 0
@@ -379,43 +538,71 @@ class AnalyticsPopup:
             else:
                 slots_with_merged_gaps.extend([None] * gap_size)
 
-        slot_index_map = {p: idx for idx, p in enumerate(slots_with_merged_gaps) if p is not None}
+        slot_index_map = {
+            p: idx for idx, p in enumerate(slots_with_merged_gaps) if p is not None
+        }
+
         def pitch_to_y(pitch):
             if pitch not in slot_index_map:
                 return None
             slot_index = slot_index_map[pitch]
-            return padded_bottom - slot_index * (padded_height / len(slots_with_merged_gaps))
+            return padded_bottom - slot_index * (
+                padded_height / len(slots_with_merged_gaps)
+            )
 
         bar_height = padded_height / len(slots_with_merged_gaps)
 
         gap_color = (128, 128, 128)
         for gap_index in gaps:
-            y = padded_bottom - gap_index * (padded_height / len(slots_with_merged_gaps))
-            points = [(x, y + math.sin(0.4*x)) for x in range(rect.left + 64, rect.right - 64)]
+            y = padded_bottom - gap_index * (
+                padded_height / len(slots_with_merged_gaps)
+            )
+            points = [
+                (x, y + math.sin(0.4 * x))
+                for x in range(rect.left + 64, rect.right - 64)
+            ]
             pygame.draw.aalines(surface, gap_color, False, points)
 
-        expected_times = [note.onset_ms for note in expected_notes] + [note.onset_ms + note.duration_ms for note in expected_notes]
+        expected_times = [note.onset_ms for note in expected_notes] + [
+            note.onset_ms + note.duration_ms for note in expected_notes
+        ]
         min_expected_time = min(expected_times) if expected_times else 0
         max_expected_time = max(expected_times) if expected_times else 1
-        expected_time_range = max_expected_time - min_expected_time if max_expected_time > min_expected_time else 1
+        expected_time_range = (
+            max_expected_time - min_expected_time
+            if max_expected_time > min_expected_time
+            else 1
+        )
 
         performed_times = []
         if performed_midi_msgs:
             current_time = 0
             for msg in performed_midi_msgs:
-                current_time += getattr(msg, 'time', 0)
+                current_time += getattr(msg, "time", 0)
                 performed_times.append(current_time)
 
         min_performed_time = min(performed_times) if performed_times else 0
         max_performed_time = max(performed_times) if performed_times else 1
-        performed_time_range = max_performed_time - min_performed_time if max_performed_time > min_performed_time else 1
+        performed_time_range = (
+            max_performed_time - min_performed_time
+            if max_performed_time > min_performed_time
+            else 1
+        )
 
         def expected_time_to_x(time_ms):
-            norm = (time_ms - min_expected_time) / expected_time_range if expected_time_range > 0 else 0
+            norm = (
+                (time_ms - min_expected_time) / expected_time_range
+                if expected_time_range > 0
+                else 0
+            )
             return (rect.left + 12) + norm * (rect.width - 32)
 
         def performed_time_to_x(time_ms):
-            norm = (time_ms - min_performed_time) / performed_time_range if performed_time_range > 0 else 0
+            norm = (
+                (time_ms - min_performed_time) / performed_time_range
+                if performed_time_range > 0
+                else 0
+            )
             return (rect.left + 12) + norm * (rect.width - 32)
 
         left_hand_color = (80, 150, 255)
@@ -430,33 +617,57 @@ class AnalyticsPopup:
             note_rect = pygame.Rect(x1, y - bar_height / 2, max(1, x2 - x1), bar_height)
             color = right_hand_color if note.mark == "rh" else left_hand_color
             pygame.draw.rect(surface, (*color, 180), note_rect, border_radius=8)
-            pygame.draw.rect(surface, color, note_rect.inflate(-4, -4), 4, border_radius=6)
+            pygame.draw.rect(
+                surface, color, note_rect.inflate(-4, -4), 4, border_radius=6
+            )
 
         performed_color = (0, 140, 40)
         if performed_midi_msgs:
             performed_onsets = {}
             current_time = 0
             for msg in performed_midi_msgs:
-                current_time += getattr(msg, 'time', 0)
+                current_time += getattr(msg, "time", 0)
                 if msg.type == "note_on" and msg.velocity > 0:
                     performed_onsets[msg.note] = current_time
-                elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
+                elif msg.type == "note_off" or (
+                    msg.type == "note_on" and msg.velocity == 0
+                ):
                     onset = performed_onsets.pop(msg.note, None)
                     if onset is not None:
                         x1 = performed_time_to_x(onset)
                         x2 = performed_time_to_x(current_time)
                         y = pitch_to_y(msg.note)
-                        note_rect = pygame.Rect(x1, y - (bar_height*.7) / 2, max(2, x2 - x1), (bar_height*.7))
-                        pygame.draw.rect(surface, (*performed_color, 180), note_rect, border_radius=8)
-                        pygame.draw.rect(surface, performed_color, note_rect.inflate(-2, -2), 2, border_radius=8)
+                        note_rect = pygame.Rect(
+                            x1,
+                            y - (bar_height * 0.7) / 2,
+                            max(2, x2 - x1),
+                            (bar_height * 0.7),
+                        )
+                        pygame.draw.rect(
+                            surface, (*performed_color, 180), note_rect, border_radius=8
+                        )
+                        pygame.draw.rect(
+                            surface,
+                            performed_color,
+                            note_rect.inflate(-2, -2),
+                            2,
+                            border_radius=8,
+                        )
         surface_element.set_image(surface)
 
     def _get_section_bounds(self):
         if self._selected_measure is None or self._selected_section is None:
             return None
         with self.save_system.guided_teacher_data as s:
-            if not s.file_exists(f"measure_{self._selected_measure}/section_{self._selected_section}/section.json"):
-                raise FileNotFoundError(f"Section {self._selected_section} not found in measure {self._selected_measure}")
-            info = json.loads(s.load_file(f"measure_{self._selected_measure}/section_{self._selected_section}/section.json"))["section"]
-            return info["start_idx"], info["end_idx"]+1
-
+            if not s.file_exists(
+                f"measure_{self._selected_measure}/section_{self._selected_section}/section.json"
+            ):
+                raise FileNotFoundError(
+                    f"Section {self._selected_section} not found in measure {self._selected_measure}"
+                )
+            info = json.loads(
+                s.load_file(
+                    f"measure_{self._selected_measure}/section_{self._selected_section}/section.json"
+                )
+            )["section"]
+            return info["start_idx"], info["end_idx"] + 1
