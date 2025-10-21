@@ -10,6 +10,7 @@ import pygame
 import mido
 import threading
 import math
+from typing import Optional, Dict, Any
 from ..ui.visual import draw_piano, draw_ui_overlay, BG_COLOR, draw_guided_mode_overlay
 from ..audio.synth import Synth, PEDAL_CC
 from .midi_teach import MidiTeacher
@@ -22,81 +23,141 @@ HIGHEST_NOTE = 108  # C8
 TOTAL_KEYS = HIGHEST_NOTE - LOWEST_NOTE + 1
 SOUNDFONT_PATH = "/home/u200b/Music/Sound fonts/GeneralUser-GS.sf2"
 
-pygame.init()
-info = pygame.display.Info()
-SCREEN_WIDTH, SCREEN_HEIGHT = info.current_w, info.current_h
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-pygame.display.set_caption("MIDI Piano Visualizer")
-clock = pygame.time.Clock()
+screen: Optional[pygame.Surface] = None
+clock: Optional[pygame.time.Clock] = None
+SCREEN_WIDTH: Optional[int] = None
+SCREEN_HEIGHT: Optional[int] = None
+WHITE_KEY_WIDTH: Optional[float] = None
+WHITE_KEY_HEIGHT: Optional[int] = None
+BLACK_KEY_WIDTH: Optional[float] = None
+BLACK_KEY_HEIGHT: Optional[float] = None
+PEDAL_WIDTH: Optional[int] = None
+PEDAL_HEIGHT: Optional[int] = None
+PEDAL_SPACING: Optional[int] = None
+PEDAL_Y: Optional[int] = None
+PIANO_Y_OFFSET: Optional[int] = None
+SHEET_Y: Optional[int] = None
 
-WHITE_KEY_WIDTH = SCREEN_WIDTH / 52
-WHITE_KEY_HEIGHT = int(WHITE_KEY_WIDTH * 7)
-BLACK_KEY_WIDTH = WHITE_KEY_WIDTH * 0.6
-BLACK_KEY_HEIGHT = WHITE_KEY_HEIGHT * 0.65
-PEDAL_WIDTH = int(WHITE_KEY_WIDTH * 1.2)
-PEDAL_HEIGHT = int(WHITE_KEY_HEIGHT * 0.6)
-PEDAL_SPACING = int(WHITE_KEY_WIDTH * 0.2)
-SHEET_Y = 24 + 28 + 64
-PIANO_Y_OFFSET = SHEET_Y + WHITE_KEY_HEIGHT + PEDAL_HEIGHT
-PEDAL_Y = PIANO_Y_OFFSET + WHITE_KEY_HEIGHT + 30
+pressed_keys: Dict[int, bool] = {}
+pressed_fade_keys: Dict[int, int] = {}
+pedals: Dict[str, bool] = {"soft": False, "sostenuto": False, "sustain": False}
+synth_enabled: bool = True
+teaching_mode: bool = True
+guided_mode: bool = False
+pressed_notes_set: set[int] = set()
+all_midi_events: list[Any] = []
 
-pressed_keys = {}
-pressed_fade_keys = {}
-pedals = {"soft": False, "sostenuto": False, "sustain": False}
-synth_enabled = True
-teaching_mode = True
-guided_mode = False
-pressed_notes_set = set()
-all_midi_events = []
+total_keys = TOTAL_KEYS
 
-piano_y_default = PIANO_Y_OFFSET
-piano_y_center = (SCREEN_HEIGHT - WHITE_KEY_HEIGHT - PEDAL_HEIGHT) // 2
-piano_y_current = float(piano_y_default)
-piano_y_target = float(piano_y_default)
+piano_y_default: Optional[float] = None
+piano_y_center: Optional[float] = None
+piano_y_current: Optional[float] = None
+piano_y_target: Optional[float] = None
 
-overlay_alpha_current = 1.0 if teaching_mode else 0.0
-overlay_alpha_target = overlay_alpha_current
-sheet_alpha_current = 1.0 if teaching_mode else 0.0
-sheet_alpha_target = sheet_alpha_current
+overlay_alpha_current: Optional[float] = None
+overlay_alpha_target: Optional[float] = None
+sheet_alpha_current: Optional[float] = None
+sheet_alpha_target: Optional[float] = None
 piano_tau = 0.12
 alpha_tau = 0.18
 
-last_time_ms = pygame.time.get_ticks()
+last_time_ms: Optional[int] = None
 
-dims = {
-    "SCREEN_WIDTH": SCREEN_WIDTH,
-    "SCREEN_HEIGHT": SCREEN_HEIGHT,
-    "WHITE_KEY_WIDTH": WHITE_KEY_WIDTH,
-    "WHITE_KEY_HEIGHT": WHITE_KEY_HEIGHT,
-    "BLACK_KEY_WIDTH": BLACK_KEY_WIDTH,
-    "BLACK_KEY_HEIGHT": BLACK_KEY_HEIGHT,
-    "PEDAL_WIDTH": PEDAL_WIDTH,
-    "PEDAL_HEIGHT": PEDAL_HEIGHT,
-    "PEDAL_SPACING": PEDAL_SPACING,
-    "PEDAL_Y": PEDAL_Y,
-    "LOWEST_NOTE": LOWEST_NOTE,
-    "HIGHEST_NOTE": HIGHEST_NOTE,
-    "PIANO_Y_OFFSET": PIANO_Y_OFFSET,
-    "SHEET_Y": SHEET_Y,
-}
+dims: Dict[str, Any] = {}
 
-font_small = pygame.font.SysFont("Segoe UI", 16)
-font_medium = pygame.font.SysFont("Segoe UI", 20, bold=True)
+font_small: Optional[pygame.font.Font] = None
+font_medium: Optional[pygame.font.Font] = None
+
+save_system: Optional[SaveSystem] = None
+midi_path: Optional[str] = None
+state_lock: Optional[threading.Lock] = None
+synth: Optional[Synth] = None
+sheet_music_renderer: Optional[SheetMusicRenderer] = None
+midi_teacher: Optional[MidiTeacher] = None
+guided_teacher: Optional[GuidedTeacher] = None
 
 
 def save_all():
     try:
-        save_system.save_midi(midi_path)
-        guided_teacher.save_state(force=True)
+        if save_system is None and guided_teacher is None:
+            return
+        if save_system is not None:
+            save_system.save_midi(midi_path)
+        if guided_teacher is not None:
+            guided_teacher.save_state(force=True)
     except Exception as e:
         print(f"Failed to save state: {e}")
 
 
-save_system = SaveSystem(before_exit_callback=save_all)
+def init_app():
+    global screen, clock, SCREEN_WIDTH, SCREEN_HEIGHT
+    global WHITE_KEY_WIDTH, WHITE_KEY_HEIGHT, BLACK_KEY_WIDTH, BLACK_KEY_HEIGHT
+    global PEDAL_WIDTH, PEDAL_HEIGHT, PEDAL_SPACING, PEDAL_Y, PIANO_Y_OFFSET, SHEET_Y
+    global piano_y_default, piano_y_center, piano_y_current, piano_y_target
+    global overlay_alpha_current, overlay_alpha_target, sheet_alpha_current, sheet_alpha_target
+    global last_time_ms, dims, font_small, font_medium
+    global save_system, midi_path, state_lock, synth, sheet_music_renderer, midi_teacher, guided_teacher
 
-midi_path = save_system.load_midi_path() or input("Enter path to MIDI file: ").strip()
+    pygame.init()
+    info = pygame.display.Info()
+    SCREEN_WIDTH, SCREEN_HEIGHT = info.current_w, info.current_h
+    screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+    pygame.display.set_caption("MIDI Piano Visualizer")
+    clock = pygame.time.Clock()
 
-state_lock = threading.Lock()
+    WHITE_KEY_WIDTH = SCREEN_WIDTH / 52
+    WHITE_KEY_HEIGHT = int(WHITE_KEY_WIDTH * 7)
+    BLACK_KEY_WIDTH = WHITE_KEY_WIDTH * 0.6
+    BLACK_KEY_HEIGHT = WHITE_KEY_HEIGHT * 0.65
+    PEDAL_WIDTH = int(WHITE_KEY_WIDTH * 1.2)
+    PEDAL_HEIGHT = int(WHITE_KEY_HEIGHT * 0.6)
+    PEDAL_SPACING = int(WHITE_KEY_WIDTH * 0.2)
+    SHEET_Y = 24 + 28 + 64
+    PIANO_Y_OFFSET = SHEET_Y + WHITE_KEY_HEIGHT + PEDAL_HEIGHT
+    PEDAL_Y = PIANO_Y_OFFSET + WHITE_KEY_HEIGHT + 30
+
+    piano_y_default = PIANO_Y_OFFSET
+    piano_y_center = (SCREEN_HEIGHT - WHITE_KEY_HEIGHT - PEDAL_HEIGHT) // 2
+    piano_y_current = float(piano_y_default)
+    piano_y_target = float(piano_y_default)
+
+    overlay_alpha_current = 1.0 if teaching_mode else 0.0
+    overlay_alpha_target = overlay_alpha_current
+    sheet_alpha_current = 1.0 if teaching_mode else 0.0
+    sheet_alpha_target = sheet_alpha_current
+
+    last_time_ms = pygame.time.get_ticks()
+
+    dims = {
+        "SCREEN_WIDTH": SCREEN_WIDTH,
+        "SCREEN_HEIGHT": SCREEN_HEIGHT,
+        "WHITE_KEY_WIDTH": WHITE_KEY_WIDTH,
+        "WHITE_KEY_HEIGHT": WHITE_KEY_HEIGHT,
+        "BLACK_KEY_WIDTH": BLACK_KEY_WIDTH,
+        "BLACK_KEY_HEIGHT": BLACK_KEY_HEIGHT,
+        "PEDAL_WIDTH": PEDAL_WIDTH,
+        "PEDAL_HEIGHT": PEDAL_HEIGHT,
+        "PEDAL_SPACING": PEDAL_SPACING,
+        "PEDAL_Y": PEDAL_Y,
+        "LOWEST_NOTE": LOWEST_NOTE,
+        "HIGHEST_NOTE": HIGHEST_NOTE,
+        "PIANO_Y_OFFSET": PIANO_Y_OFFSET,
+        "SHEET_Y": SHEET_Y,
+    }
+
+    font_small = pygame.font.SysFont("Segoe UI", 16)
+    font_medium = pygame.font.SysFont("Segoe UI", 20, bold=True)
+
+    save_system = SaveSystem(before_exit_callback=save_all)
+    midi_path = save_system.load_midi_path() or input("Enter path to MIDI file: ").strip()
+    state_lock = threading.Lock()
+
+    synth = Synth(SOUNDFONT_PATH, render)
+    sheet_music_renderer = SheetMusicRenderer(
+        midi_path, SCREEN_WIDTH, save_system=save_system
+    )
+    midi_teacher = MidiTeacher(midi_path, sheet_music_renderer, save_system=save_system)
+    guided_teacher = GuidedTeacher(midi_teacher, synth, save_system=save_system)
 
 
 def render():
@@ -108,6 +169,10 @@ def render():
         overlay_alpha_target, \
         sheet_alpha_current, \
         sheet_alpha_target
+
+    if screen is None or last_time_ms is None:
+        return
+
     now_ms = pygame.time.get_ticks()
     dt = max(0.0, (now_ms - last_time_ms) / 1000.0)
     last_time_ms = now_ms
@@ -159,14 +224,6 @@ def render():
     guided_teacher.render(screen)
 
     pygame.display.flip()
-
-
-synth = Synth(SOUNDFONT_PATH, render)
-sheet_music_renderer = SheetMusicRenderer(
-    midi_path, SCREEN_WIDTH, save_system=save_system
-)
-midi_teacher = MidiTeacher(midi_path, sheet_music_renderer, save_system=save_system)
-guided_teacher = GuidedTeacher(midi_teacher, synth, save_system=save_system)
 
 
 def midi_listener():
@@ -335,6 +392,8 @@ def run():
 
 
 def main():
+    init_app()
+
     midi_thread = threading.Thread(target=midi_listener, daemon=True)
     midi_thread.start()
 
