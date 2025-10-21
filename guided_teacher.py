@@ -1,9 +1,10 @@
 import time
 from collections import deque
-from dataclasses import dataclass, asdict
+from dataclasses import asdict
 import mido
 import pygame
 from evaluator import Evaluator
+from mt_types import PerformanceEvaluation, MeasureSection
 from midi_teach import MidiTeacher
 from synth import Synth
 from abc import ABC, abstractmethod
@@ -15,14 +16,6 @@ from save_system import SaveSystem
 
 CHORDS_PER_SECTION = (3, 4)
 SAVE_THROTTLE_SECONDS = 2.0
-
-@dataclass(frozen=True)
-class MeasureSection:
-    chords: list
-    times: list
-    xs: list
-    start_idx: int
-    end_idx: int
 
 class Task(ABC):
     def __init__(self, teacher: 'GuidedTeacher'):
@@ -37,7 +30,7 @@ class Task(ABC):
         pass
 
     @abstractmethod
-    def on_tick(self, pressed_notes, pressed_note_events, pygame_events):
+    def on_tick(self, pressed_notes: set[int], midi_events: list[mido.Message], pygame_events: list[pygame.event.Event]):
         pass
 
 class PlaybackMeasureTask(Task):
@@ -49,8 +42,8 @@ class PlaybackMeasureTask(Task):
         self.played = False
 
     def on_start(self):
-        _, _, self.notes_x, _, _, _ = self.teacher.midi_teacher.get_notes_for_measure(self.measure)
-        self.teacher.current_section_visual_info = [self.notes_x[0], self.notes_x[-1]]
+        _, _, self.notes_x, _, _ = self.teacher.midi_teacher.get_notes_for_measure(self.measure)
+        self.teacher.current_section_visual_info = [self.notes_x[0], self.notes_x[-1]] if self.notes_x else None
 
     def on_end(self):
         self.teacher.current_section_visual_info = None
@@ -71,6 +64,7 @@ class PracticeSectionTask(Task):
         self.measure = measure
         self.start_idx = section.start_idx
         self.end_idx = section.end_idx
+        self.section_index = next((i for i, sec in enumerate(self.teacher.split_measure_into_sections(self.measure)) if sec.start_idx == self.section.start_idx and sec.end_idx == self.section.end_idx), None)
 
         self.timer_start = None
         self.recording = mido.MidiTrack()
@@ -93,12 +87,12 @@ class PracticeSectionTask(Task):
         self.teacher.midi_teacher.loop_enabled = False
         self.teacher.current_section_visual_info = None
 
-    def on_tick(self, pressed_notes, pressed_note_events, pygame_events):
+    def on_tick(self, pressed_notes, midi_events, pygame_events):
         self._handle_pygame_events(pygame_events)
-        self._handle_midi_events(pressed_notes, pressed_note_events)
+        self._handle_midi_events(pressed_notes, midi_events)
 
         if self._waiting_for_wrap_release:
-            if not (self._wrap_pressed_notes & pressed_notes):
+            if not (self._wrap_pressed_notes & pressed_notes) and len(midi_events) == 0:
                 self._waiting_for_wrap_release = False
                 self._wrap_pressed_notes.clear()
                 self._handle_evaluate()
@@ -130,9 +124,10 @@ class PracticeSectionTask(Task):
                 elif event.key == pygame.K_SPACE:
                     self.teacher.synth.play_notes(self.section.chords, self.section.times, self.start_idx, self.teacher.midi_teacher.seek_to_index, self.teacher.midi_teacher.get_current_index())
 
-    def _handle_midi_events(self, pressed_notes: set[int], pressed_note_events):
-        if len(self.recording) == 0 and len(pressed_note_events) > 0:
-            times = [ev.time for ev in pressed_note_events if hasattr(ev, 'time') and ev.note in [n[0] for n in self.section.chords[0]]]
+    def _handle_midi_events(self, pressed_notes: set[int], midi_events: list[mido.Message]):
+        if len(self.recording) == 0 and len(midi_events) > 0:
+            first_chord = [n[0] for n in self.section.chords[0]]
+            times = [getattr(ev, 'time', None) for ev in midi_events if hasattr(ev, 'time') and hasattr(ev, 'note') and getattr(ev, 'note', None) in first_chord]
             if not times:
                 return
             earliest = min(times)
@@ -141,45 +136,27 @@ class PracticeSectionTask(Task):
         if self._last_record_time is None and self.timer_start is not None:
             self._last_record_time = self.timer_start
 
-        current = pressed_notes.copy()
-        new_notes = current - self._prev_pressed_notes
-        released_notes = self._prev_pressed_notes - current
+        if self.timer_start is not None:
+            for msg in midi_events:
+                t = getattr(msg, 'time', time.time())
+                delta_ms = max(int((t - self._last_record_time) * 1000), 0) if self._last_record_time is not None else 0
+                self.recording.append(msg.copy(time=delta_ms))
+                self._last_record_time = t
 
-        def append_msg(msg: mido.Message, timestamp_s: float):
-            if self._last_record_time is None:
-                delta_ms = 0
-            else:
-                delta_ms = max(int((timestamp_s - self._last_record_time) * 1000), 0)
-            msg.time = delta_ms
-            self.recording.append(msg)
-            self._last_record_time = timestamp_s
-
-        for note in sorted(new_notes):
-            ev = next((ev for ev in pressed_note_events if ev.note == note), None)
-            if ev is not None and hasattr(ev, 'time'):
-                t = ev.time
-                vel = getattr(ev, 'velocity', 127)
-            else:
-                t = time.time()
-                vel = 127
-            append_msg(mido.Message('note_on', note=note, velocity=vel), t)
-
-        now = time.time()
-        for note in sorted(released_notes):
-            append_msg(mido.Message('note_off', note=note, velocity=0), now)
-
-        self._prev_pressed_notes = current
+        self._prev_pressed_notes = pressed_notes.copy()
 
     def _handle_evaluate(self):
         print(self.recording)
-        evaluator = Evaluator(self)
+        evaluator = Evaluator(
+            self.recording,
+            self.teacher.midi_teacher.query_notes_and_pedals(self.start_idx, self.end_idx),
+        )
         score = evaluator.score
-        guidance_text = evaluator.generate_guidance(score)
+        guidance_text = evaluator.tip
 
-        self.teacher.last_score = score.overall
+        self.teacher.last_score = score
         self._save_pass(evaluator)
-        print(f"Eval: accuracy={score.accuracy:.3f} rel={score.relative_timing:.3f} abs={score.absolute_timing:.3f} -> score={score.overall:.3f}")
-        if score.overall > 0.95 and self.teacher.auto_advance:
+        if score > 0.95 and self.teacher.auto_advance:
             self.teacher.synth.play_success_sound()
             self.teacher.next_task()
             self.teacher.guide_text = "Great! " + guidance_text
@@ -187,45 +164,37 @@ class PracticeSectionTask(Task):
             self.teacher.guide_text = guidance_text
 
     def _save_pass(self, evaluator):
-        if isinstance(self, PracticeMeasureTask):
-            section_idx = "measure"
-        elif isinstance(self, PracticeTransitionTask):
-            section_idx = "transition"
-        else:
-            section_idx = next((i for i, sec in enumerate(self.teacher.split_measure_into_sections(self.measure)) if sec.start_idx == self.section.start_idx and sec.end_idx == self.section.end_idx), None)
-        if section_idx is not None:
-            pass_idx = self.teacher.pass_index.get(str(self.measure), {}).get(str(section_idx), 0)
-            analytics = evaluator.analytics.copy()
-            analytics["score"] = {
-                "overall": evaluator.score.overall,
-                "accuracy": evaluator.score.accuracy,
-                "relative_timing": evaluator.score.relative_timing,
-                "absolute_timing": evaluator.score.absolute_timing,
-            }
-            self.teacher.save_pass(self.measure, section_idx, pass_idx, analytics,
-                                   self.recording.copy(), self.section)
+        if self.section_index is not None:
+            self.teacher.save_pass(str(self.measure), str(self.section_index), self.teacher.pass_index.get(str(self.measure), {}).get(str(self.section_index), 0), evaluator.full_evaluation,
+                                   self.recording, self.section)
         else:
             print(f"Could not find section {self.section.start_idx} {self.section.end_idx} in measure {self.measure}")
 
 class PracticeMeasureTask(PracticeSectionTask):
     def __init__(self, teacher: 'GuidedTeacher', measure):
-        chords, times, xs, _, (measure_start_index, _), _ = teacher.midi_teacher.get_notes_for_measure(measure)
+        chords, times, xs, _, (measure_start_index, _) = teacher.midi_teacher.get_notes_for_measure(measure)
         start_idx = measure_start_index
         end_idx = start_idx + len(chords) - 1 if chords else start_idx
         section = MeasureSection(chords, times, xs, start_idx, end_idx)
         super().__init__(teacher, section, measure)
+        self.section_index = "measure"
 
 class PracticeTransitionTask(PracticeSectionTask):
     def __init__(self, teacher, from_measure, to_measure):
-        from_chords, from_times, from_xs, _, (from_start_idx, _), _ = teacher.midi_teacher.get_notes_for_measure(from_measure)
-        to_chords, to_times, to_xs, _, (to_start_idx, _), _ = teacher.midi_teacher.get_notes_for_measure(to_measure)
+        from_chords, from_times, from_xs, _, (from_start_idx, _) = teacher.midi_teacher.get_notes_for_measure(from_measure)
+        to_chords, to_times, to_xs, _, (to_start_idx, _) = teacher.midi_teacher.get_notes_for_measure(to_measure)
         section_chords = from_chords[-2:] + to_chords[:2]
-        section_times = [0, from_times[-1] - from_times[-2]]  + [(from_times[-1] - from_times[-2])*2, to_times[1] + (from_times[-1] - from_times[-2])*2]
+        if len(from_times) >= 2 and len(to_times) >= 2:
+            dt = from_times[-1] - from_times[-2]
+            section_times = [0, dt] + [2 * dt, to_times[1] + 2 * dt]
+        else:
+            section_times = [0] * len(section_chords)
         section_xs = from_xs[-2:] + to_xs[:2]
         start_idx = from_start_idx + max(0, len(from_chords) - 2)
         end_idx = to_start_idx + min(1, len(to_chords) - 1) if to_chords else start_idx
         section = MeasureSection(section_chords, section_times, section_xs, start_idx, end_idx)
         super().__init__(teacher, section, from_measure)
+        self.section_index = "transition"
 
     def _handle_pygame_events(self, pygame_events):
         for event in pygame_events:
@@ -324,7 +293,7 @@ class GuidedTeacher:
         self.current_task = None
         self.midi_teacher.loop_enabled, self.midi_teacher.loop_start, self.midi_teacher.loop_end = self._loop_info_before
 
-    def update(self, pressed_notes, pressed_note_events, pygame_events):
+    def update(self, pressed_notes, midi_events, pygame_events):
         if not self.is_active:
             return
 
@@ -340,7 +309,8 @@ class GuidedTeacher:
 
         if not self.current_task and self.tasks:
             self.next_task()
-        self.current_task.on_tick(pressed_notes, pressed_note_events, pygame_events)
+        if self.current_task:
+            self.current_task.on_tick(pressed_notes, midi_events, pygame_events)
 
         for event in pygame_events:
             if event.type == pygame.KEYDOWN:
@@ -393,7 +363,7 @@ class GuidedTeacher:
         self.save_state(force=True)
 
     def split_measure_into_sections(self, measure_index):
-        measure_chords, measure_times, measure_xs, _, (measure_start_index, _), _ = self.midi_teacher.get_notes_for_measure(measure_index)
+        measure_chords, measure_times, measure_xs, _, (measure_start_index, _) = self.midi_teacher.get_notes_for_measure(measure_index)
         if not measure_chords:
             return []
 
@@ -485,16 +455,17 @@ class GuidedTeacher:
         self.guide_text = d.get('guide_text', None)
         self.pass_index = d.get('pass_index', {})
 
-    def save_pass(self, measure_idx, section_idx, pass_idx, analytics, recording, section: MeasureSection):
+    def save_pass(self, measure_idx: str, section_idx: str, pass_idx: int, evaluation: PerformanceEvaluation, recording: mido.MidiTrack, section: MeasureSection):
         with self.save_system as s:
             if pass_idx == 0:
                 s.save_file(f"measure_{measure_idx}/section_{section_idx}/section.json", json.dumps({'section': asdict(section), 'timestamp': time.time()}, indent=2, default=str))
-            s.save_file(f"measure_{measure_idx}/section_{section_idx}/pass_{pass_idx}.json", json.dumps({'analytics': analytics, 'timestamp': time.time()}, indent=2, default=str))
+            s.save_file(f"measure_{measure_idx}/section_{section_idx}/pass_{pass_idx}.json", json.dumps({'evaluation': asdict(evaluation), 'timestamp': time.time()}, indent=2, default=str))
             if recording is not None and isinstance(recording, mido.MidiTrack):
-                mid = mido.MidiFile()
-                mid.tracks.append(recording)
+                mid = mido.MidiFile(ticks_per_beat=1000)
+                track = mido.MidiTrack()
+                track.append(mido.MetaMessage('set_tempo', tempo=1000000, time=0))
+                track.extend(recording)
+                mid.tracks.append(track)
                 mid.save(s.get_absolute_path(f"measure_{measure_idx}/section_{section_idx}/pass_{pass_idx}.mid"))
-        measure_key = str(measure_idx)
-        section_key = str(section_idx)
-        self.pass_index[measure_key] = self.pass_index.get(measure_key, {})
-        self.pass_index[measure_key][section_key] = self.pass_index[measure_key].get(section_key, 0) + 1
+        self.pass_index[measure_idx] = self.pass_index.get(measure_idx, {})
+        self.pass_index[measure_idx][section_idx] = self.pass_index[measure_idx].get(section_idx, 0) + 1
