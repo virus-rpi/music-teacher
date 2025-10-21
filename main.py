@@ -189,6 +189,8 @@ while running:
             if event.key == pygame.K_g:
                 guided_mode = not guided_mode
                 if guided_mode:
+                    teaching_mode = True
+                    pressed_notes_set.clear()
                     guided_teacher.start()
                 else:
                     guided_teacher.stop()
