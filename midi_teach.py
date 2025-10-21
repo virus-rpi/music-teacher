@@ -319,7 +319,7 @@ class MidiTeacher:
 
             self.measures.append(MeasureData(
                 chords=measure_chords,
-                times=measure_chord_times,
+                times=[int(self._tick_to_ms(t)) for t in measure_chord_times],
                 xs=measure_note_xs,
                 start_x=start_x,
                 end_x=end_x,
