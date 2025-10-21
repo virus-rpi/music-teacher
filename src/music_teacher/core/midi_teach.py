@@ -370,7 +370,7 @@ class MidiTeacher:
     def get_notes_for_measure(
         self, measure_index, unpacked=True
     ) -> tuple[list, list, list, tuple[int, int], tuple[int, int]] | MeasureData:
-        """Returns (chords, times, note_xs, (start_x, end_x), (start_index, end_index), midi_msgs) for the given measure index."""
+        """Returns (chords, times, note_xs, (start_x, end_x), (start_index, end_index)) for the given measure index."""
         if 0 <= measure_index < len(self.measures):
             if unpacked:
                 measure_data = self.measures[measure_index]
