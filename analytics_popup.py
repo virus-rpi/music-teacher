@@ -6,9 +6,8 @@ from collections import defaultdict
 import matplotlib
 import numpy as np
 import pygame
-from mido import MidiTrack
 
-from evaluator import PerformanceEvaluation
+from mt_types import PerformanceEvaluation, Note
 from flexbox import FlexBox
 from save_system import SaveSystem
 
@@ -329,10 +328,6 @@ class AnalyticsPopup:
             evaluation = raw.get('evaluation', {})
             return PerformanceEvaluation(**evaluation) if evaluation else PerformanceEvaluation()
 
-    def _get_expected_notes_for_section(self):
-        """Get expected notes for the current section."""
-        return {i: track for i, track in enumerate(self.teacher.midi_teacher.get_midi_messages_between_indices(*self._get_section_bounds()))}
-
     def _render_pianoroll(self, flexbox: FlexBox):
         surface_element = pygame_gui.elements.UIImage(
             image_surface=pygame.Surface((100, 100), pygame.SRCALPHA),
@@ -344,16 +339,16 @@ class AnalyticsPopup:
 
         pygame.draw.rect(surface, (20, 20, 20), rect, border_radius=8)
 
-        expected_midi_msgs = self._get_expected_notes_for_section()
-
-        performed_notes = self.teacher.midi_teacher.get_performed_notes_for_measure(
+        expected_notes = self.teacher.midi_teacher.query_notes_and_pedals(*self._get_section_bounds())[0]
+        performed_midi_msgs = self.teacher.midi_teacher.get_performed_notes_for_measure(
             self._selected_measure, self._selected_section, self._selected_pass
         )
-        if not expected_midi_msgs and not performed_notes:
+
+        if not expected_notes and not performed_midi_msgs:
             return
-        all_notes = [msg.note for track_index in range(len(expected_midi_msgs)) for msg in expected_midi_msgs[track_index] if msg.type in ("note_on", "note_off")]
-        if performed_notes:
-            all_notes += [msg.note for msg in performed_notes if msg.type in ("note_on", "note_off")]
+        all_notes = [note.pitch for note in expected_notes]
+        if performed_midi_msgs:
+            all_notes += [msg.note for msg in performed_midi_msgs if msg.type in ("note_on", "note_off")]
         if not all_notes:
             return
 
@@ -397,76 +392,61 @@ class AnalyticsPopup:
             points = [(x, y + math.sin(0.4*x)) for x in range(rect.left + 64, rect.right - 64)]
             pygame.draw.aalines(surface, gap_color, False, points)
 
-        expected_notes_absolute = {0: MidiTrack(), 1: MidiTrack()}
-        first_time = None
-        for track_index, track in enumerate(expected_midi_msgs.values() if expected_midi_msgs else []):
-            current_time = 0
-            for msg in track:
-                if first_time is None:
-                    first_time = getattr(msg, 'time', 0)
-                current_time += getattr(msg, 'time', 0)
-                expected_notes_absolute[track_index].append(msg.copy(time=current_time-first_time))
-
-        expected_times_list = []
-        for track in expected_notes_absolute.values() if expected_notes_absolute else []:
-            for msg in track:
-                if hasattr(msg, "time"):
-                    expected_times_list.append(getattr(msg, "time", 0))
-        performed_notes_absolute = []
-        current_time = 0
-        for msg in performed_notes:
-            current_time += getattr(msg, 'time', 0)
-            performed_notes_absolute.append(msg.copy(time = current_time))
-
-        performed_times_list = [msg.time for msg in performed_notes_absolute if hasattr(msg, "time")]
-
-        min_expected_time = min(expected_times_list) if expected_times_list else 0
-        max_expected_time = max(expected_times_list) if expected_times_list else 1
+        expected_times = [note.onset_ms for note in expected_notes] + [note.onset_ms + note.duration_ms for note in expected_notes]
+        min_expected_time = min(expected_times) if expected_times else 0
+        max_expected_time = max(expected_times) if expected_times else 1
         expected_time_range = max_expected_time - min_expected_time if max_expected_time > min_expected_time else 1
 
-        min_performed_time = min(performed_times_list) if performed_times_list else 0
-        max_performed_time = max(performed_times_list) if performed_times_list else 1
+        performed_times = []
+        if performed_midi_msgs:
+            current_time = 0
+            for msg in performed_midi_msgs:
+                current_time += getattr(msg, 'time', 0)
+                performed_times.append(current_time)
+
+        min_performed_time = min(performed_times) if performed_times else 0
+        max_performed_time = max(performed_times) if performed_times else 1
         performed_time_range = max_performed_time - min_performed_time if max_performed_time > min_performed_time else 1
-        def expected_time_to_x(time):
-            norm = (time - min_expected_time) / expected_time_range if expected_time_range > 0 else 0
+
+        def expected_time_to_x(time_ms):
+            norm = (time_ms - min_expected_time) / expected_time_range if expected_time_range > 0 else 0
             return (rect.left + 12) + norm * (rect.width - 32)
 
-        def performed_time_to_x(time):
-            norm = (time - min_performed_time) / performed_time_range if performed_time_range > 0 else 0
+        def performed_time_to_x(time_ms):
+            norm = (time_ms - min_performed_time) / performed_time_range if performed_time_range > 0 else 0
             return (rect.left + 12) + norm * (rect.width - 32)
 
-        expected_onsets = {}
         left_hand_color = (80, 150, 255)
         right_hand_color = (255, 80, 80)
-        for track_index, track in enumerate(expected_notes_absolute.values() if expected_notes_absolute else []):
-            for msg in track:
-                if msg.type == "note_on" and msg.velocity > 0:
-                    expected_onsets[msg.note] = getattr(msg, "time", 0)
-                elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
-                    onset = expected_onsets.pop(msg.note, None)
-                    if onset is not None:
-                        x1 = expected_time_to_x(onset)
-                        x2 = expected_time_to_x(getattr(msg, "time", 0))
-                        y = pitch_to_y(msg.note)
-                        note_rect = pygame.Rect(x1, y - bar_height / 2, max(1, x2 - x1), bar_height)
-                        color = right_hand_color if track_index == 0 else left_hand_color
-                        pygame.draw.rect(surface, (*color, 180), note_rect, border_radius=8)
-                        pygame.draw.rect(surface, color, note_rect.inflate(-4, -4), 4, border_radius=6)
 
-        performed_onsets = {}
+        for note in expected_notes:
+            x1 = expected_time_to_x(note.onset_ms)
+            x2 = expected_time_to_x(note.onset_ms + note.duration_ms)
+            y = pitch_to_y(note.pitch)
+            if y is None:
+                continue
+            note_rect = pygame.Rect(x1, y - bar_height / 2, max(1, x2 - x1), bar_height)
+            color = right_hand_color if note.mark == "rh" else left_hand_color
+            pygame.draw.rect(surface, (*color, 180), note_rect, border_radius=8)
+            pygame.draw.rect(surface, color, note_rect.inflate(-4, -4), 4, border_radius=6)
+
         performed_color = (0, 140, 40)
-        for msg in performed_notes_absolute:
-            if msg.type == "note_on" and msg.velocity > 0:
-                performed_onsets[msg.note] = msg.time
-            elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
-                onset = performed_onsets.pop(msg.note, None)
-                if onset is not None:
-                    x1 = performed_time_to_x(onset)
-                    x2 = performed_time_to_x(msg.time)
-                    y = pitch_to_y(msg.note)
-                    note_rect = pygame.Rect(x1, y - (bar_height*.7) / 2, max(2, x2 - x1), (bar_height*.7))
-                    pygame.draw.rect(surface, (*performed_color, 180), note_rect, border_radius=8)
-                    pygame.draw.rect(surface, performed_color, note_rect.inflate(-2, -2), 2, border_radius=8)
+        if performed_midi_msgs:
+            performed_onsets = {}
+            current_time = 0
+            for msg in performed_midi_msgs:
+                current_time += getattr(msg, 'time', 0)
+                if msg.type == "note_on" and msg.velocity > 0:
+                    performed_onsets[msg.note] = current_time
+                elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
+                    onset = performed_onsets.pop(msg.note, None)
+                    if onset is not None:
+                        x1 = performed_time_to_x(onset)
+                        x2 = performed_time_to_x(current_time)
+                        y = pitch_to_y(msg.note)
+                        note_rect = pygame.Rect(x1, y - (bar_height*.7) / 2, max(2, x2 - x1), (bar_height*.7))
+                        pygame.draw.rect(surface, (*performed_color, 180), note_rect, border_radius=8)
+                        pygame.draw.rect(surface, performed_color, note_rect.inflate(-2, -2), 2, border_radius=8)
         surface_element.set_image(surface)
 
     def _get_section_bounds(self):

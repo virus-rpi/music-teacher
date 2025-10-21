@@ -3,7 +3,8 @@ from collections import deque
 from dataclasses import dataclass, asdict
 import mido
 import pygame
-from evaluator import Evaluator, PerformanceEvaluation
+from evaluator import Evaluator
+from mt_types import PerformanceEvaluation
 from midi_teach import MidiTeacher
 from synth import Synth
 from abc import ABC, abstractmethod
@@ -158,7 +159,10 @@ class PracticeSectionTask(Task):
 
     def _handle_evaluate(self):
         print(self.recording)
-        evaluator = Evaluator(self.recording, self.teacher.midi_teacher.get_midi_messages_between_indices(self.start_idx, self.end_idx+1))
+        evaluator = Evaluator(
+            self.recording,
+            self.teacher.midi_teacher.query_notes_and_pedals(self.start_idx, self.end_idx),
+        )
         score = evaluator.score
         guidance_text = evaluator.tip
 

@@ -1,11 +1,16 @@
 import difflib
 from collections import defaultdict
-from dataclasses import dataclass, field
 from pprint import pprint
-from typing import Optional, Literal
+from typing import Optional
 import numpy as np
 from mido import MidiTrack
 from scipy.optimize import linear_sum_assignment
+
+from mt_types import (
+    Note, PedalEvent, NoteEvaluation, Issue, HandIssueSummary,
+    PerformanceEvaluation, articulation_type
+)
+from midi_utils import extract_notes_and_pedal
 
 weights = {
     "accuracy": 0.42,
@@ -16,135 +21,6 @@ weights = {
     "tempo": 0.10,
 }
 assert sum(weights.values()) == 1.0, "Weights must sum to 1.0"
-
-articulation_type = Literal["staccato", "legato", "normal"]
-issue_category = Literal["accuracy", "timing", "dynamics", "pedal", "articulation"]
-pedal_type = Literal["sustain", "sostenuto", "soft"]
-
-@dataclass
-class NoteEvaluation:
-    pitch_correct: bool
-    pitch_error: Optional[int] = None
-    onset_deviation_ms: float = 0.0
-    duration_deviation_ms: float = 0.0
-    velocity_deviation: float = 0.0
-    articulation: Optional[articulation_type] = None
-    pedal_used: Optional[bool] = None
-    time_ms: Optional[int] = None
-    comments: Optional[str] = None
-
-
-@dataclass
-class Issue:
-    time_ms: int
-    note: Optional[int] = None
-    severity: float = 0.0    # 0–1 scaled severity
-    category: issue_category = ""
-    description: str = ""
-
-@dataclass
-class HandIssueSummary:
-    total_issues: int = 0
-    by_category: dict[str, int] = field(default_factory=lambda: defaultdict(int))
-    avg_severity: float = 0.0
-
-
-@dataclass
-class PerformanceEvaluation:
-    notes: list[NoteEvaluation] = field(default_factory=list)
-    issues: list[Issue] = field(default_factory=list)
-
-    total_notes: int = 0
-    correct_notes: int = 0
-    wrong_notes: int = 0
-    missing_notes: int = 0
-    extra_notes: int = 0
-
-    avg_timing_deviation_ms: float = 0.0
-    avg_duration_deviation_ms: float = 0.0
-    avg_velocity_deviation: float = 0.0
-
-    rhythmic_stability: float = 0.0
-    tempo_consistency: float = 0.0
-    dynamic_balance: float = 0.0
-
-    phrasing_similarity: float = 0.0
-    hand_independence: float = 0.0
-    chord_accuracy: float = 0.0
-
-    tempo_deviation_ratio: float = 1.0
-    tempo_accuracy_score: float = 1.0
-
-    hand_summary: dict[str, HandIssueSummary] = field(default_factory=dict)
-
-    overall_score: float = 0.0
-    accuracy_score: float = 0.0
-    timing_score: float = 0.0
-    dynamics_score: float = 0.0
-    articulation_score: float = 0.0
-    pedal_score: float = 0.0
-    comments: Optional[list[str]] = None
-
-@dataclass(frozen=True)
-class Note:
-    pitch: int
-    onset_ms: int
-    duration_ms: int
-    velocity: int
-    mark: Optional[str] = None
-
-@dataclass
-class PedalEvent:
-    time_ms: int
-    value: int
-    pedal_type: pedal_type
-
-
-def _extract_notes_and_pedal(track: MidiTrack, mark: Optional[str]=None) -> tuple[list[Note], list[PedalEvent]]:
-    """
-    Extract notes and pedal events (CC64).
-    """
-    notes = []
-    pedals = []
-    current_time = 0
-    note_on = {}
-
-    pedal_types: dict[int, pedal_type] = {64: "sustain", 66: "sostenuto", 67: "soft"}
-
-    for msg in track:
-        current_time += msg.time
-        if msg.type == "note_on" and msg.velocity > 0:
-            note_on[msg.note] = (current_time, msg.velocity)
-        elif msg.type in ("note_off", "note_on") and msg.note in note_on:
-            start_time, velocity = note_on.pop(msg.note)
-            duration = current_time - start_time
-            notes.append(Note(
-                pitch=msg.note,
-                onset_ms=start_time,
-                duration_ms=duration,
-                velocity=velocity,
-                mark=mark
-            ))
-        elif msg.type == "control_change" and msg.control in pedal_types:
-            pedals.append(PedalEvent(
-                time_ms=current_time,
-                value=msg.value,
-                pedal_type=pedal_types[msg.control]
-            ))
-
-    while note_on:
-        pitch, (start_time, velocity) = note_on.popitem()
-        duration = current_time - start_time
-        notes.append(Note(
-            pitch=pitch,
-            onset_ms=start_time,
-            duration_ms=duration,
-            velocity=velocity,
-            mark=mark
-        ))
-
-    return notes, pedals
-
 
 def _match_notes(ref_notes: list[Note], rec_notes: list[Note]) -> tuple[list[tuple[Note, Optional[Note]]], list[Note], float]:
     if not ref_notes:
@@ -432,9 +308,9 @@ def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
 
 
 class Evaluator:
-    def __init__(self, recording: MidiTrack, reference: tuple[MidiTrack, MidiTrack]):
+    def __init__(self, recording: MidiTrack, reference: tuple[list[Note], list[PedalEvent]]):
         self.recording: MidiTrack = recording
-        self.reference: tuple[MidiTrack, MidiTrack] = reference
+        self.reference: tuple[list[Note], list[PedalEvent]] = reference
         self._evaluation: Optional[PerformanceEvaluation] = None
 
     @property
@@ -456,12 +332,8 @@ class Evaluator:
         return encouragement + str(evaluation.comments[0]) if evaluation.comments else encouragement.strip() or "Perfect performance!"
 
     def _evaluate(self):
-        ref_rh, pedals_rh = _extract_notes_and_pedal(self.reference[0], mark="rh")
-        ref_lh, pedals_lh = _extract_notes_and_pedal(self.reference[1], mark="lh")
-        rec_notes, rec_pedals = _extract_notes_and_pedal(self.recording)
-
-        ref_all = sorted(ref_rh + ref_lh, key=lambda note: note.onset_ms)
-        ref_pedals = sorted(pedals_rh + pedals_lh, key=lambda pedal: pedal.time_ms)
+        rec_notes, rec_pedals = extract_notes_and_pedal(self.recording)
+        ref_all, ref_pedals = self.reference
 
         matches, extras, tempo_ratio = _match_notes(ref_all, rec_notes)
         evaluation = PerformanceEvaluation(total_notes=len(ref_all))
