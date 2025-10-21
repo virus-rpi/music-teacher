@@ -65,7 +65,7 @@ SOUNDFONT_PATH = "/path/to/your/soundfont.sf2"
 If installed as a package:
 ```bash
 # Run the application
-music-teacher
+uv run music-teacher
 ```
 
 Or from the source directory:
