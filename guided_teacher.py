@@ -461,8 +461,11 @@ class GuidedTeacher:
                 s.save_file(f"measure_{measure_idx}/section_{section_idx}/section.json", json.dumps({'section': asdict(section), 'timestamp': time.time()}, indent=2, default=str))
             s.save_file(f"measure_{measure_idx}/section_{section_idx}/pass_{pass_idx}.json", json.dumps({'evaluation': asdict(evaluation), 'timestamp': time.time()}, indent=2, default=str))
             if recording is not None and isinstance(recording, mido.MidiTrack):
-                mid = mido.MidiFile()
-                mid.tracks.append(recording)
+                mid = mido.MidiFile(ticks_per_beat=1000)
+                track = mido.MidiTrack()
+                track.append(mido.MetaMessage('set_tempo', tempo=1000000, time=0))
+                track.extend(recording)
+                mid.tracks.append(track)
                 mid.save(s.get_absolute_path(f"measure_{measure_idx}/section_{section_idx}/pass_{pass_idx}.mid"))
         self.pass_index[measure_idx] = self.pass_index.get(measure_idx, {})
         self.pass_index[measure_idx][section_idx] = self.pass_index[measure_idx].get(section_idx, 0) + 1
