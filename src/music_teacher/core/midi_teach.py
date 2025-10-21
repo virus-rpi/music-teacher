@@ -1,13 +1,20 @@
 import time
 from bisect import bisect_left, bisect_right
+from dataclasses import replace
 import mido
-from save_system import SaveSystem
-from sheet_music import SheetMusicRenderer
-from mt_types import Note, PedalEvent, MeasureData
-from midi_utils import extract_notes_and_pedal
+from ..utils.save_system import SaveSystem
+from ..ui.sheet_music import SheetMusicRenderer
+from ..utils.data_types import Note, PedalEvent, MeasureData
+from ..utils.midi_utils import extract_notes_and_pedal
+
 
 class MidiTeacher:
-    def __init__(self, midi_path, sheet_music_renderer: SheetMusicRenderer, save_system: SaveSystem = None):
+    def __init__(
+        self,
+        midi_path,
+        sheet_music_renderer: SheetMusicRenderer,
+        save_system: SaveSystem = None,
+    ):
         self.save_system = save_system or SaveSystem()
         self.midi_path = self.save_system.load_midi_path() or midi_path
         self.sheet_music_renderer = sheet_music_renderer
@@ -35,14 +42,24 @@ class MidiTeacher:
             abs_time = 0
             for msg in track:
                 abs_time += msg.time
-                if msg.type == 'note_on' and getattr(msg, 'velocity', 0) > 0:
+                if msg.type == "note_on" and getattr(msg, "velocity", 0) > 0:
                     events.append((abs_time, msg.note, track_idx))
                     note_on_times[(msg.note, track_idx, abs_time)] = abs_time
-                elif (msg.type == 'note_off') or (msg.type == 'note_on' and getattr(msg, 'velocity', 0) == 0):
-                    candidates = [(k, v) for k, v in note_on_times.items() if k[0] == msg.note and k[1] == track_idx]
+                elif (msg.type == "note_off") or (
+                    msg.type == "note_on" and getattr(msg, "velocity", 0) == 0
+                ):
+                    candidates = [
+                        (k, v)
+                        for k, v in note_on_times.items()
+                        if k[0] == msg.note and k[1] == track_idx
+                    ]
                     if candidates:
-                        (note, t_idx, onset_tick), _ = max(candidates, key=lambda x: x[1])
-                        note_durations.append((msg.note, track_idx, onset_tick, abs_time))
+                        (note, t_idx, onset_tick), _ = max(
+                            candidates, key=lambda x: x[1]
+                        )
+                        note_durations.append(
+                            (msg.note, track_idx, onset_tick, abs_time)
+                        )
                         del note_on_times[(note, t_idx, onset_tick)]
         events.sort()
         chords_dict = {}
@@ -52,31 +69,42 @@ class MidiTeacher:
         track_note_counts = {}
         for _, note, track_idx in events:
             track_note_counts[track_idx] = track_note_counts.get(track_idx, 0) + 1
-        sorted_tracks = sorted(track_note_counts, key=track_note_counts.get, reverse=True)
+        sorted_tracks = sorted(
+            track_note_counts, key=track_note_counts.get, reverse=True
+        )
         if len(sorted_tracks) < 2:
-            hand_map = {sorted_tracks[0]: 'R'} if sorted_tracks else {}
+            hand_map = {sorted_tracks[0]: "R"} if sorted_tracks else {}
         else:
-            hand_map = {sorted_tracks[0]: 'R', sorted_tracks[1]: 'L'}
+            hand_map = {sorted_tracks[0]: "R", sorted_tracks[1]: "L"}
         chords = []
         times = []
         chords_with_durations = []
         for t in sorted_times:
             notes = chords_dict[t]
-            chord = [(note, hand_map.get(track_idx, 'R')) for note, track_idx in notes]
+            chord = [(note, hand_map.get(track_idx, "R")) for note, track_idx in notes]
             chords.append(chord)
             times.append(t)
             chord_notes_with_durations = []
             for note, track_idx in notes:
-                match = next(((n, hand_map.get(track_idx, 'R'), onset, offset)
-                              for n, t_idx, onset, offset in note_durations
-                              if n == note and t_idx == track_idx and onset == t), None)
+                match = next(
+                    (
+                        (n, hand_map.get(track_idx, "R"), onset, offset)
+                        for n, t_idx, onset, offset in note_durations
+                        if n == note and t_idx == track_idx and onset == t
+                    ),
+                    None,
+                )
                 if match:
                     chord_notes_with_durations.append(match)
                 else:
-                    chord_notes_with_durations.append((note, hand_map.get(track_idx, 'R'), t, t))
+                    chord_notes_with_durations.append(
+                        (note, hand_map.get(track_idx, "R"), t, t)
+                    )
             chords_with_durations.append(chord_notes_with_durations)
         self.chord_notes_with_durations = chords_with_durations
-        print(f"Extracted {len(chords)} chords in {time.perf_counter() - timer:.3f} seconds")
+        print(
+            f"Extracted {len(chords)} chords in {time.perf_counter() - timer:.3f} seconds"
+        )
         return chords, times
 
     def get_next_notes(self):
@@ -205,8 +233,8 @@ class MidiTeacher:
         for track in self.midi.tracks:
             abs_tick = 0
             for msg in track:
-                abs_tick += getattr(msg, 'time', 0)
-                if msg.type == 'set_tempo':
+                abs_tick += getattr(msg, "time", 0)
+                if msg.type == "set_tempo":
                     tempo_changes.append((abs_tick, int(msg.tempo)))
         tempo_changes.sort(key=lambda x: x[0])
         if not tempo_changes or tempo_changes[0][0] != 0:
@@ -231,7 +259,9 @@ class MidiTeacher:
                 next_tick = collapsed[i + 1][0]
                 if next_tick > start_tick:
                     cum_ms += (next_tick - start_tick) * ms_per_tick
-        print(f"Built tempo map with {len(self._tempo_segments)} segments in {time.perf_counter() - timer:.3f} seconds")
+        print(
+            f"Built tempo map with {len(self._tempo_segments)} segments in {time.perf_counter() - timer:.3f} seconds"
+        )
 
     def _tick_to_ms(self, tick: int) -> float:
         """Convert an absolute tick to absolute milliseconds using tempo segments."""
@@ -247,7 +277,7 @@ class MidiTeacher:
         """Convert an absolute tick and duration to absolute milliseconds using tempo segments."""
         if not self._tempo_segments:
             return 0.0
-        return  self._tick_to_ms(tick + duration) -  self._tick_to_ms(tick)
+        return self._tick_to_ms(tick + duration) - self._tick_to_ms(tick)
 
     def _get_measure_tick_boundaries(self):
         """Returns a list of (start_tick, end_tick) for each measure in the MIDI file."""
@@ -259,7 +289,7 @@ class MidiTeacher:
             abs_tick = 0
             for msg in track:
                 abs_tick += msg.time
-                if msg.type == 'time_signature':
+                if msg.type == "time_signature":
                     time_sig_changes.append((abs_tick, msg.numerator, msg.denominator))
         time_sig_changes.sort()
         measure_boundaries: list[tuple[int, int]] = []
@@ -269,9 +299,13 @@ class MidiTeacher:
         next_time_sig_idx = 0
         last_tick = self.chord_times[-1] if self.chord_times else 0
         while current_tick <= last_tick + ticks_per_beat:
-            if (next_time_sig_idx < len(time_sig_changes) and
-                current_tick >= time_sig_changes[next_time_sig_idx][0]):
-                _, current_numerator, current_denominator = time_sig_changes[next_time_sig_idx]
+            if (
+                next_time_sig_idx < len(time_sig_changes)
+                and current_tick >= time_sig_changes[next_time_sig_idx][0]
+            ):
+                _, current_numerator, current_denominator = time_sig_changes[
+                    next_time_sig_idx
+                ]
                 next_time_sig_idx += 1
             beats_per_measure = current_numerator
             beat_length = ticks_per_beat * 4 // current_denominator
@@ -309,31 +343,45 @@ class MidiTeacher:
                     measure_chord_indices.append(chord_idx)
                 chord_idx += 1
             measure_chords = [chords[j] for j in measure_chord_indices]
-            measure_chord_times = [chord_times[j] - start_tick for j in measure_chord_indices]
-            measure_note_xs: list[int] = [notehead_xs[j] for j in measure_chord_indices] if notehead_xs else []
+            measure_chord_times = [
+                chord_times[j] - start_tick for j in measure_chord_indices
+            ]
+            measure_note_xs: list[int] = (
+                [notehead_xs[j] for j in measure_chord_indices] if notehead_xs else []
+            )
             if measure_chord_indices:
                 start_index = measure_chord_indices[0]
                 end_index = measure_chord_indices[-1] + 1
             else:
                 start_index = end_index = chord_idx
 
-            self.measures.append(MeasureData(
-                chords=measure_chords,
-                times=[int(self._tick_to_ms(t)) for t in measure_chord_times],
-                xs=measure_note_xs,
-                start_x=start_x,
-                end_x=end_x,
-                start_index=start_index,
-                end_index=end_index,
-            ))
+            self.measures.append(
+                MeasureData(
+                    chords=measure_chords,
+                    times=[int(self._tick_to_ms(t)) for t in measure_chord_times],
+                    xs=measure_note_xs,
+                    start_x=start_x,
+                    end_x=end_x,
+                    start_index=start_index,
+                    end_index=end_index,
+                )
+            )
         print(f"Built measure data in {time.perf_counter() - timer:.3f} seconds")
 
-    def get_notes_for_measure(self, measure_index, unpacked=True) -> tuple[list, list, list, tuple[int, int], tuple[int, int]] | MeasureData:
-        """Returns (chords, times, note_xs, (start_x, end_x), (start_index, end_index), midi_msgs) for the given measure index."""
+    def get_notes_for_measure(
+        self, measure_index, unpacked=True
+    ) -> tuple[list, list, list, tuple[int, int], tuple[int, int]] | MeasureData:
+        """Returns (chords, times, note_xs, (start_x, end_x), (start_index, end_index)) for the given measure index."""
         if 0 <= measure_index < len(self.measures):
             if unpacked:
                 measure_data = self.measures[measure_index]
-                return measure_data.chords, measure_data.times, measure_data.xs, (measure_data.start_x, measure_data.end_x), (measure_data.start_index, measure_data.end_index)
+                return (
+                    measure_data.chords,
+                    measure_data.times,
+                    measure_data.xs,
+                    (measure_data.start_x, measure_data.end_x),
+                    (measure_data.start_index, measure_data.end_index),
+                )
             else:
                 return self.measures[measure_index]
         return [], [], [], (0, 0), (0, 0) if unpacked else MeasureData()
@@ -344,11 +392,17 @@ class MidiTeacher:
             return []
         try:
             with self.save_system.guided_teacher_data as s:
-                mid = mido.MidiFile(s.get_absolute_path(f"measure_{measure_index}/section_{section}/pass_{pass_num}.mid"))
+                mid = mido.MidiFile(
+                    s.get_absolute_path(
+                        f"measure_{measure_index}/section_{section}/pass_{pass_num}.mid"
+                    )
+                )
                 return list(mid.tracks[0]) if mid.tracks else []
 
         except (FileNotFoundError, OSError, Exception) as e:
-            print(f"Failed to load performed notes for measure {measure_index}, section {section}, pass {pass_num}: {e}")
+            print(
+                f"Failed to load performed notes for measure {measure_index}, section {section}, pass {pass_num}: {e}"
+            )
             return []
 
     def _preprocess_track_indices(self):
@@ -360,12 +414,16 @@ class MidiTeacher:
             times_ms = []
             msg_list = []
             for msg in track:
-                delta_ms = int(self._tick_duration_to_ms(abs_tick, getattr(msg, 'time', 0)))
-                abs_tick += getattr(msg, 'time', 0)
+                delta_ms = int(
+                    self._tick_duration_to_ms(abs_tick, getattr(msg, "time", 0))
+                )
+                abs_tick += getattr(msg, "time", 0)
                 times_ms.append(int(self._tick_to_ms(abs_tick)))
                 msg_list.append(msg.copy(time=delta_ms))
             self._track_msg_indices.append((times_ms, msg_list))
-        print(f"Preprocessed track message indices in {time.perf_counter() - timer:.3f} seconds")
+        print(
+            f"Preprocessed track message indices in {time.perf_counter() - timer:.3f} seconds"
+        )
 
     def _preprocess_notes_and_pedals(self):
         timer = time.perf_counter()
@@ -375,27 +433,59 @@ class MidiTeacher:
         self._pedal_time_indices: list[list[int]] = []
 
         for track_idx, track in enumerate(self.midi.tracks):
-            notes, pedals = extract_notes_and_pedal(track, mark="rh" if track_idx == 0 else "lh" if track_idx == 1 else "unknown")
-            notes = list(map(lambda n: n.copy(onset_ms=int(self._tick_to_ms(n.onset_ms))), notes))
-            pedals = list(map(lambda p: p.copy(time_ms=int(self._tick_to_ms(p.time_ms))), pedals))
+            notes, pedals = extract_notes_and_pedal(
+                track,
+                mark="rh" if track_idx == 0 else "lh" if track_idx == 1 else "unknown",
+            )
+            notes = list(
+                map(lambda n: replace(n, onset_ms=int(self._tick_to_ms(n.onset_ms))), notes)
+            )
+            pedals = list(
+                map(lambda p: replace(p, time_ms=int(self._tick_to_ms(p.time_ms))), pedals)
+            )
             self._preprocessed_notes.append(notes)
             self._preprocessed_pedals.append(pedals)
             self._note_onset_indices.append([note.onset_ms for note in notes])
             self._pedal_time_indices.append([pedal.time_ms for pedal in pedals])
 
-        print(f"Preprocessed notes and pedals in {time.perf_counter() - timer:.3f} seconds")
+        print(
+            f"Preprocessed notes and pedals in {time.perf_counter() - timer:.3f} seconds"
+        )
 
-    def query_notes_and_pedals(self, start_idx: int, end_idx: int) -> tuple[list[Note], list[PedalEvent]]:
-        if not hasattr(self, '_preprocessed_notes'):
+    def query_notes_and_pedals(
+        self, start_idx: int, end_idx: int
+    ) -> tuple[list[Note], list[PedalEvent]]:
+        if not hasattr(self, "_preprocessed_notes"):
             return [], []
         start_ms = int(round(self._tick_to_ms(self.chord_times[start_idx])))
-        end_ms = int(round(self._tick_to_ms(
-            self.chord_times[-1] + 1 if end_idx >= len(self.chord_times) else self.chord_times[end_idx])))
+        end_ms = int(
+            round(
+                self._tick_to_ms(
+                    self.chord_times[-1] + 1
+                    if end_idx >= len(self.chord_times)
+                    else self.chord_times[end_idx]
+                )
+            )
+        )
         notes = []
         pedals = []
         for track_idx in range(len(self._preprocessed_notes)):
             onset_times = self._note_onset_indices[track_idx]
-            notes.extend(self._preprocessed_notes[track_idx][bisect_left(onset_times, start_ms):bisect_left(onset_times, end_ms)])
+            notes.extend(
+                self._preprocessed_notes[track_idx][
+                    bisect_left(onset_times, start_ms) : bisect_left(
+                        onset_times, end_ms
+                    )
+                ]
+            )
             pedal_times = self._pedal_time_indices[track_idx]
-            pedals.extend(self._preprocessed_pedals[track_idx][bisect_left(pedal_times, start_ms):bisect_left(pedal_times, end_ms)])
-        return sorted(notes, key=lambda n: n.onset_ms), sorted(pedals, key=lambda p: p.time_ms)
+            pedals.extend(
+                self._preprocessed_pedals[track_idx][
+                    bisect_left(pedal_times, start_ms) : bisect_left(
+                        pedal_times, end_ms
+                    )
+                ]
+            )
+        return sorted(notes, key=lambda n: n.onset_ms), sorted(
+            pedals, key=lambda p: p.time_ms
+        )

@@ -1,4 +1,7 @@
 .sheet_music_cache
-guided_teacher_state.json
+saves/*
+save/*
 *.mtsf
-guided_teacher_save
+src/music_teacher.egg-info
+.idea
+dist

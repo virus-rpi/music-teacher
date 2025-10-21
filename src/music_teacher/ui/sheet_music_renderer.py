@@ -4,6 +4,7 @@ from svgelements import SVG, Group, Path as SVGPath, Shape, Matrix, Title, Desc
 import bisect
 import copy
 
+
 def run_musescore(midi_path: Path, svg_path: Path, mscore_cmd="mscore"):
     """
     Call MuseScore to export MIDI to SVG.
@@ -11,6 +12,7 @@ def run_musescore(midi_path: Path, svg_path: Path, mscore_cmd="mscore"):
     cmd = [mscore_cmd, str(midi_path), "-o", str(svg_path)]
     print("Running:", " ".join(cmd))
     subprocess.run(cmd, check=True)
+
 
 def fix_svg_scaling(svg_in: Path, svg_out: Path):
     """
@@ -23,6 +25,7 @@ def fix_svg_scaling(svg_in: Path, svg_out: Path):
             element.transform *= f"scale({scale_factor})"
     svg.write_xml(str(svg_out))
 
+
 def find_top_and_bottom(element: Shape) -> tuple[float, float]:
     """
     Use svgelements bounding box to get top and bottom of an element.
@@ -31,6 +34,7 @@ def find_top_and_bottom(element: Shape) -> tuple[float, float]:
     if bbox is None:
         return 0.0, 0.0
     return bbox[1], bbox[3]
+
 
 def find_x_coordinate(element: Shape) -> float:
     """
@@ -41,6 +45,7 @@ def find_x_coordinate(element: Shape) -> float:
         return 0.0
     return (bbox[0] + bbox[2]) / 2.0
 
+
 def looks_like_background(element: Shape) -> bool:
     """
     Detect MuseScore background rectangles/paths.
@@ -50,10 +55,18 @@ def looks_like_background(element: Shape) -> bool:
     if str(element.fill).lower() not in ("#fff", "#ffffff", "white"):
         return False
     if isinstance(element, SVGPath):
-        return element.d().startswith("M0,0") or element.d().startswith("M0 0") or element.d().startswith("M 0,0") or element.d().startswith("M 0 0")
+        return (
+            element.d().startswith("M0,0")
+            or element.d().startswith("M0 0")
+            or element.d().startswith("M 0,0")
+            or element.d().startswith("M 0 0")
+        )
     return False
 
-def remove_unwanted_elements(element, remove_classes=("Page", "Tempo", "MeasureNumber")):
+
+def remove_unwanted_elements(
+    element, remove_classes=("Page", "Tempo", "MeasureNumber")
+):
     if isinstance(element, list):
         new_elements = []
         for e in element:
@@ -67,7 +80,13 @@ def remove_unwanted_elements(element, remove_classes=("Page", "Tempo", "MeasureN
             if not remove_unwanted_elements(e, remove_classes):
                 new_elements.append(e)
         element.elements = new_elements
-    return "class" in element.values and any(c in element.values["class"] for c in remove_classes) or isinstance(element, (Title, Desc)) or looks_like_background(element)
+    return (
+        "class" in element.values
+        and any(c in element.values["class"] for c in remove_classes)
+        or isinstance(element, (Title, Desc))
+        or looks_like_background(element)
+    )
+
 
 def apply_offset(element, offset):
     """Recursively apply vertical translation to element(s)."""
@@ -76,8 +95,9 @@ def apply_offset(element, offset):
             apply_offset(e, offset)
     else:
         element *= Matrix.translate_y(offset)
-        if hasattr(element, 'elements'):
+        if hasattr(element, "elements"):
             apply_offset(list(element.elements()), offset)
+
 
 def merge_svgs_to_long_page(svg_paths):
     """
@@ -107,6 +127,7 @@ def merge_svgs_to_long_page(svg_paths):
     print("done.")
     return merged
 
+
 def group_by_bracket(svg: SVG):
     """
     Group elements by bracket alignment using bounding boxes.
@@ -127,16 +148,22 @@ def group_by_bracket(svg: SVG):
             left, top, right, bottom = bbox[0], bbox[1], bbox[2], bbox[3]
         center = (top + bottom) / 2.0
         x_center = (left + right) / 2.0
-        cached.append({
-            "elem": elem,
-            "bbox": bbox,
-            "top": top,
-            "bottom": bottom,
-            "center": center,
-            "x": x_center,
-        })
+        cached.append(
+            {
+                "elem": elem,
+                "bbox": bbox,
+                "top": top,
+                "bottom": bottom,
+                "center": center,
+                "x": x_center,
+            }
+        )
 
-    brackets = [c.copy() for c in cached if "Bracket" in getattr(c["elem"], "values", {}).get("class", "")]
+    brackets = [
+        c.copy()
+        for c in cached
+        if "Bracket" in getattr(c["elem"], "values", {}).get("class", "")
+    ]
 
     if not brackets:
         print("done.")
@@ -214,6 +241,7 @@ def group_by_bracket(svg: SVG):
     print("done.")
     return grouped_svg
 
+
 def group_by_measure(svg: SVG) -> SVG:
     """
     Split each bracket group into measures based on BarLine elements.
@@ -230,7 +258,9 @@ def group_by_measure(svg: SVG) -> SVG:
     for group in [g for g in list(svg.elements())[1:] if isinstance(g, Group)]:
         elems = list(group)
 
-        bar_lines = [e for e in elems if "BarLine" in getattr(e, "values", {}).get("class", "")]
+        bar_lines = [
+            e for e in elems if "BarLine" in getattr(e, "values", {}).get("class", "")
+        ]
         bar_infos = []
         for bl in bar_lines:
             bb = bl.bbox()
@@ -258,7 +288,7 @@ def group_by_measure(svg: SVG) -> SVG:
         scaffolding = Group(id=f"{group.values.get('id')}-Scaffolding")
         for i in range(len(bar_positions) - 1):
             x_start = bar_positions[i][0]
-            x_end = bar_positions[i+1][0]
+            x_end = bar_positions[i + 1][0]
 
             content = []
 
@@ -290,6 +320,7 @@ def group_by_measure(svg: SVG) -> SVG:
     print("done.")
     return new_svg
 
+
 def strip_duplicate_clefs(svg: SVG) -> SVG:
     print("Stripping duplicate clefs...", end="")
 
@@ -298,12 +329,19 @@ def strip_duplicate_clefs(svg: SVG) -> SVG:
     print("done.")
     return svg
 
+
 def extract_measure_data(svg: SVG):
     measure_data = []
     for group in [g for g in list(svg.elements())[1:] if isinstance(g, Group)]:
-        for measure_group in [mg for mg in list(group) if isinstance(mg, Group) and 'Measure' in mg.values.get('id', '')]:
+        for measure_group in [
+            mg
+            for mg in list(group)
+            if isinstance(mg, Group) and "Measure" in mg.values.get("id", "")
+        ]:
             note_xs = []
-            for note_element in [n for n in list(measure_group) if 'Note' in n.values.get('class', '')]:
+            for note_element in [
+                n for n in list(measure_group) if "Note" in n.values.get("class", "")
+            ]:
                 try:
                     bb = note_element.bbox()
                     if bb:
@@ -319,6 +357,7 @@ def extract_measure_data(svg: SVG):
             else:
                 measure_data.append((None, None, 0))
     return measure_data
+
 
 def bracket_groups_to_long_strip(svg: SVG) -> SVG:
     print("Laying out bracket groups into one long strip...", end="")
@@ -338,7 +377,7 @@ def bracket_groups_to_long_strip(svg: SVG) -> SVG:
         if own:
             bb = [own[0], own[1], own[2], own[3]]
         # recurse into children if any
-        if hasattr(elem, 'elements'):
+        if hasattr(elem, "elements"):
             for child in list(elem.elements()):
                 cb = compute_bbox(child)
                 if cb:
@@ -380,12 +419,13 @@ def bracket_groups_to_long_strip(svg: SVG) -> SVG:
 
         g_copy *= Matrix.translate(dx, dy)
         for bar_line in [g for g in g_copy[0] if g.values["class"] == "BarLine"][2:-2]:
-            bar_line *= Matrix.translate(-dx/2, -dy/2)
+            bar_line *= Matrix.translate(-dx / 2, -dy / 2)
         out.append(g_copy)
         current_x += w
 
     print("done.")
     return out
+
 
 def midi_to_svg(midi_file: str, out_dir: str, mscore_cmd="mscore"):
     midi_path = Path(midi_file).resolve()
@@ -424,14 +464,14 @@ def midi_to_svg(midi_file: str, out_dir: str, mscore_cmd="mscore"):
     try:
         for elem in grouped.elements():
             candidates = [elem]
-            if hasattr(elem, 'elements'):
+            if hasattr(elem, "elements"):
                 candidates = list(elem.elements())
             for e in candidates:
                 try:
-                    vals = getattr(e, 'values', {}) or {}
-                    cls = vals.get('class', '')
+                    vals = getattr(e, "values", {}) or {}
+                    cls = vals.get("class", "")
                 except Exception:
-                    cls = ''
+                    cls = ""
                 if str(cls) == "Note":
                     try:
                         bb = e.bbox()
@@ -455,9 +495,10 @@ def midi_to_svg(midi_file: str, out_dir: str, mscore_cmd="mscore"):
     print(f"Done. Final merged SVG: {grouped_out}")
     return sorted(list(set(note_xs))), measure_data
 
+
 if __name__ == "__main__":
     midi_to_svg(
         "/home/u200b/Music/Credits Song For My Death.mid",
         "./.sheet_music_cache/",
-        "mscore"
+        "mscore",
     )
