@@ -7,9 +7,9 @@ import matplotlib
 import numpy as np
 import pygame
 
-from mt_types import PerformanceEvaluation
-from flexbox import FlexBox
-from save_system import SaveSystem
+from ..utils.data_types import PerformanceEvaluation
+from .flexbox import FlexBox
+from ..utils.save_system import SaveSystem
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -339,7 +339,8 @@ class AnalyticsPopup:
 
         pygame.draw.rect(surface, (20, 20, 20), rect, border_radius=8)
 
-        expected_notes = self.teacher.midi_teacher.query_notes_and_pedals(*self._get_section_bounds())[0]
+        if (expected_notes := self.teacher.midi_teacher.query_notes_and_pedals(*bounds)[0] if (bounds := self._get_section_bounds()) is not None else None) is None:
+            return
         performed_midi_msgs = self.teacher.midi_teacher.get_performed_notes_for_measure(
             self._selected_measure, self._selected_section, self._selected_pass
         )
@@ -451,6 +452,8 @@ class AnalyticsPopup:
         surface_element.set_image(surface)
 
     def _get_section_bounds(self):
+        if self._selected_measure is None or self._selected_section is None:
+            return None
         with self.save_system.guided_teacher_data as s:
             if not s.file_exists(f"measure_{self._selected_measure}/section_{self._selected_section}/section.json"):
                 raise FileNotFoundError(f"Section {self._selected_section} not found in measure {self._selected_measure}")

@@ -2,12 +2,12 @@ from pathlib import Path
 import math
 import pygame
 from PIL import Image, ImageOps, ImageFilter, UnidentifiedImageError
-from sheet_music_renderer import midi_to_svg
+from .sheet_music_renderer import midi_to_svg
 from typing import Optional
 import cairosvg
 import json
 import xml.etree.ElementTree as ElementTree
-from save_system import SaveSystem
+from ..utils.save_system import SaveSystem
 import io
 
 _resampling = getattr(Image, "Resampling", Image)

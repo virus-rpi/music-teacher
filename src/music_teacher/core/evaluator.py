@@ -5,11 +5,11 @@ import numpy as np
 from mido import MidiTrack
 from scipy.optimize import linear_sum_assignment
 
-from mt_types import (
+from ..utils.data_types import (
     Note, PedalEvent, NoteEvaluation, Issue, HandIssueSummary,
     PerformanceEvaluation, articulation_type
 )
-from midi_utils import extract_notes_and_pedal
+from ..utils.midi_utils import extract_notes_and_pedal
 
 weights = {
     "accuracy": 0.42,

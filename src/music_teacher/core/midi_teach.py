@@ -1,10 +1,10 @@
 import time
 from bisect import bisect_left, bisect_right
 import mido
-from save_system import SaveSystem
-from sheet_music import SheetMusicRenderer
-from mt_types import Note, PedalEvent, MeasureData
-from midi_utils import extract_notes_and_pedal
+from ..utils.save_system import SaveSystem
+from ..ui.sheet_music import SheetMusicRenderer
+from ..utils.data_types import Note, PedalEvent, MeasureData
+from ..utils.midi_utils import extract_notes_and_pedal
 
 class MidiTeacher:
     def __init__(self, midi_path, sheet_music_renderer: SheetMusicRenderer, save_system: SaveSystem = None):

@@ -1,14 +1,21 @@
+"""
+Main application module for the Music Teacher application.
+
+This module serves as the primary entry point for the Music Teacher app.
+It initializes the PyGame environment, sets up the components, and runs the main loop.
+"""
+
 import time
 import pygame
 import mido
 import threading
-from visual import draw_piano, draw_ui_overlay, BG_COLOR, draw_guided_mode_overlay
-from synth import Synth, PEDAL_CC
-from midi_teach import MidiTeacher
-from sheet_music import SheetMusicRenderer
-from guided_teacher import GuidedTeacher
-from save_system import SaveSystem
 import math
+from ..ui.visual import draw_piano, draw_ui_overlay, BG_COLOR, draw_guided_mode_overlay
+from ..audio.synth import Synth, PEDAL_CC
+from .midi_teach import MidiTeacher
+from ..ui.sheet_music import SheetMusicRenderer
+from .guided_teacher import GuidedTeacher
+from ..utils.save_system import SaveSystem
 
 LOWEST_NOTE = 21   # A0
 HIGHEST_NOTE = 108 # C8
@@ -173,114 +180,123 @@ def midi_listener():
                         if synth_enabled:
                             synth.pedal_cc(msg.control, msg.value)
 
-midi_thread = threading.Thread(target=midi_listener, daemon=True)
-midi_thread.start()
+def run():
+    global teaching_mode, guided_mode, synth_enabled, midi_teacher, guided_teacher, all_midi_events, pressed_notes_set
 
-running = True
-while running:
-    events = pygame.event.get()
-    if guided_mode and teaching_mode:
-        guided_teacher.update(pressed_notes_set, all_midi_events, events)
-    all_midi_events.clear()
-    for event in events:
-        if event.type == pygame.QUIT or (
-            event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
-            running = False
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_s:
-                synth_enabled = not synth_enabled
-                print(f"Synth enabled: {synth_enabled}")
-            if event.key == pygame.K_t:
-                teaching_mode = not teaching_mode
-                print(f"Teaching mode: {teaching_mode}")
-                midi_teacher.reset()
-                pressed_notes_set.clear()
-            if event.key == pygame.K_g:
-                guided_mode = not guided_mode
-                if guided_mode:
-                    teaching_mode = True
+    running = True
+    while running:
+        events = pygame.event.get()
+        if guided_mode and teaching_mode:
+            guided_teacher.update(pressed_notes_set, all_midi_events, events)
+        all_midi_events.clear()
+        for event in events:
+            if event.type == pygame.QUIT or (
+                event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
+                running = False
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_s:
+                    synth_enabled = not synth_enabled
+                    print(f"Synth enabled: {synth_enabled}")
+                if event.key == pygame.K_t:
+                    teaching_mode = not teaching_mode
+                    print(f"Teaching mode: {teaching_mode}")
+                    midi_teacher.reset()
                     pressed_notes_set.clear()
-                    guided_teacher.start()
-                else:
-                    guided_teacher.stop()
-                print(f"Guided mode: {guided_mode}")
-            if event.key == pygame.K_d and teaching_mode:
-                advanced = midi_teacher.advance_one()
-                if advanced:
-                    print("[Debug] Advanced teacher by one chord.")
-                else:
-                    print("[Debug] Already at end; cannot advance.")
+                if event.key == pygame.K_g:
+                    guided_mode = not guided_mode
+                    if guided_mode:
+                        teaching_mode = True
+                        pressed_notes_set.clear()
+                        guided_teacher.start()
+                    else:
+                        guided_teacher.stop()
+                    print(f"Guided mode: {guided_mode}")
+                if event.key == pygame.K_d and teaching_mode:
+                    advanced = midi_teacher.advance_one()
+                    if advanced:
+                        print("[Debug] Advanced teacher by one chord.")
+                    else:
+                        print("[Debug] Already at end; cannot advance.")
 
-            # Seeking controls
-            if event.key in (pygame.K_RIGHT, pygame.K_LEFT):
-                # compute step based on modifiers
-                step = 1
-                mods = pygame.key.get_mods()
-                if mods & pygame.KMOD_SHIFT:
-                    step = 10
-                elif mods & pygame.KMOD_CTRL:
-                    step = 5
-                if event.key == pygame.K_LEFT:
-                    step = -step
-                midi_teacher.seek_relative(step)
+                # Seeking controls
+                if event.key in (pygame.K_RIGHT, pygame.K_LEFT):
+                    # compute step based on modifiers
+                    step = 1
+                    mods = pygame.key.get_mods()
+                    if mods & pygame.KMOD_SHIFT:
+                        step = 10
+                    elif mods & pygame.KMOD_CTRL:
+                        step = 5
+                    if event.key == pygame.K_LEFT:
+                        step = -step
+                    midi_teacher.seek_relative(step)
 
-            # loop controls: set start/end and toggle
-            if event.key == pygame.K_COMMA:  # ','
-                midi_teacher.set_loop_start()
-                ls, le, _ = midi_teacher.get_loop_range()
-                print(f"Set loop start to {ls}")
-            if event.key == pygame.K_PERIOD:  # '.'
-                midi_teacher.set_loop_end()
-                ls, le, _ = midi_teacher.get_loop_range()
-                print(f"Set loop end to {le}")
-            if event.key == pygame.K_l:
-                midi_teacher.toggle_loop()
-                print(f"Loop enabled: {midi_teacher.loop_enabled}")
-
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            mx, my = event.pos
-            bar_height = 28
-            bar_margin = 24
-            bar_width = int(SCREEN_WIDTH * 0.7)
-            bx = int((SCREEN_WIDTH - bar_width) / 2)
-            by = bar_margin
-            if bx <= mx <= bx + bar_width and by <= my <= by + bar_height:
-                rel = (mx - bx) / float(bar_width)
-                rel = max(0.0, min(1.0, rel))
-                total = midi_teacher.get_total_chords()
-                if total > 0:
-                    idx = int(round(rel * (total - 1)))
-                else:
-                    idx = 0
-
-                mods = pygame.key.get_mods()
-                if event.button == 1 and not (mods & (pygame.KMOD_SHIFT | pygame.KMOD_CTRL)):
-                    midi_teacher.seek_to_progress(rel)
-                elif event.button == 1 and (mods & pygame.KMOD_SHIFT):
-                    # shift+left-click: set loop start
-                    midi_teacher.set_loop_start_index(idx)
+                # loop controls: set start/end and toggle
+                if event.key == pygame.K_COMMA:  # ','
+                    midi_teacher.set_loop_start()
                     ls, le, _ = midi_teacher.get_loop_range()
                     print(f"Set loop start to {ls}")
-                elif event.button == 1 and (mods & pygame.KMOD_CTRL):
-                    # ctrl+left-click: set loop end
-                    midi_teacher.set_loop_end_index(idx)
+                if event.key == pygame.K_PERIOD:  # '.'
+                    midi_teacher.set_loop_end()
                     ls, le, _ = midi_teacher.get_loop_range()
                     print(f"Set loop end to {le}")
-                elif event.button == 2:
-                    # middle click: set loop start
-                    midi_teacher.set_loop_start_index(idx)
-                    ls, le, _ = midi_teacher.get_loop_range()
-                    print(f"Set loop start to {ls}")
-                elif event.button == 3:
-                    # right-click: set the loop end
-                    midi_teacher.set_loop_end_index(idx)
-                    ls, le, _ = midi_teacher.get_loop_range()
-                    print(f"Set loop end to {le}")
+                if event.key == pygame.K_l:
+                    midi_teacher.toggle_loop()
+                    print(f"Loop enabled: {midi_teacher.loop_enabled}")
 
-                pressed_notes_set.clear()
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                mx, my = event.pos
+                bar_height = 28
+                bar_margin = 24
+                bar_width = int(SCREEN_WIDTH * 0.7)
+                bx = int((SCREEN_WIDTH - bar_width) / 2)
+                by = bar_margin
+                if bx <= mx <= bx + bar_width and by <= my <= by + bar_height:
+                    rel = (mx - bx) / float(bar_width)
+                    rel = max(0.0, min(1.0, rel))
+                    total = midi_teacher.get_total_chords()
+                    if total > 0:
+                        idx = int(round(rel * (total - 1)))
+                    else:
+                        idx = 0
 
-    render()
-    clock.tick(60)
+                    mods = pygame.key.get_mods()
+                    if event.button == 1 and not (mods & (pygame.KMOD_SHIFT | pygame.KMOD_CTRL)):
+                        midi_teacher.seek_to_progress(rel)
+                    elif event.button == 1 and (mods & pygame.KMOD_SHIFT):
+                        # shift+left-click: set loop start
+                        midi_teacher.set_loop_start_index(idx)
+                        ls, le, _ = midi_teacher.get_loop_range()
+                        print(f"Set loop start to {ls}")
+                    elif event.button == 1 and (mods & pygame.KMOD_CTRL):
+                        # ctrl+left-click: set loop end
+                        midi_teacher.set_loop_end_index(idx)
+                        ls, le, _ = midi_teacher.get_loop_range()
+                        print(f"Set loop end to {le}")
+                    elif event.button == 2:
+                        # middle click: set loop start
+                        midi_teacher.set_loop_start_index(idx)
+                        ls, le, _ = midi_teacher.get_loop_range()
+                        print(f"Set loop start to {ls}")
+                    elif event.button == 3:
+                        # right-click: set the loop end
+                        midi_teacher.set_loop_end_index(idx)
+                        ls, le, _ = midi_teacher.get_loop_range()
+                        print(f"Set loop end to {le}")
 
-pygame.quit()
-synth.delete()
+                    pressed_notes_set.clear()
+
+        render()
+        clock.tick(60)
+
+def main():
+    midi_thread = threading.Thread(target=midi_listener, daemon=True)
+    midi_thread.start()
+
+    run()
+
+    pygame.quit()
+    synth.delete()
+
+if __name__ == "__main__":
+    main()

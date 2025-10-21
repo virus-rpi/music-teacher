@@ -3,16 +3,16 @@ from collections import deque
 from dataclasses import asdict
 import mido
 import pygame
-from evaluator import Evaluator
-from mt_types import PerformanceEvaluation, MeasureSection
-from midi_teach import MidiTeacher
-from synth import Synth
+from .evaluator import Evaluator
+from ..utils.data_types import PerformanceEvaluation, MeasureSection
+from .midi_teach import MidiTeacher
+from ..audio.synth import Synth
 from abc import ABC, abstractmethod
 import json
 import os
-from analytics_popup import AnalyticsPopup
+from ..ui.analytics_popup import AnalyticsPopup
 import threading
-from save_system import SaveSystem
+from ..utils.save_system import SaveSystem
 
 CHORDS_PER_SECTION = (3, 4)
 SAVE_THROTTLE_SECONDS = 2.0

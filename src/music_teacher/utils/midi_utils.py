@@ -1,6 +1,6 @@
 from typing import Optional
 from mido import MidiTrack
-from mt_types import Note, PedalEvent, pedal_type
+from .data_types import Note, PedalEvent, pedal_type
 
 
 def extract_notes_and_pedal(track: MidiTrack, mark: Optional[str] = None) -> tuple[list[Note], list[PedalEvent]]:
