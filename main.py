@@ -87,6 +87,8 @@ save_system = SaveSystem(before_exit_callback=save_all)
 
 midi_path = save_system.load_midi_path() or input("Enter path to MIDI file: ").strip()
 
+state_lock = threading.Lock()
+
 def render():
     global last_time_ms, piano_y_current, piano_y_target, overlay_alpha_current, overlay_alpha_target, sheet_alpha_current, sheet_alpha_target
     now_ms = pygame.time.get_ticks()
@@ -106,7 +108,11 @@ def render():
         sheet_alpha_current += (sheet_alpha_target - sheet_alpha_current) * b
     dims['PIANO_Y_OFFSET'] = piano_y_current
     dims['PEDAL_Y'] = int(piano_y_current + WHITE_KEY_HEIGHT + 30)
-    draw_piano(screen, pressed_keys, pressed_fade_keys, pedals, dims,
+    with state_lock:
+        pressed_keys_snapshot = dict(pressed_keys)
+        pressed_fade_keys_snapshot = dict(pressed_fade_keys)
+        pedals_snapshot = dict(pedals)
+    draw_piano(screen, pressed_keys_snapshot, pressed_fade_keys_snapshot, pedals_snapshot, dims,
                midi_teacher.get_next_notes() if teaching_mode else set())
     draw_ui_overlay(screen, midi_teacher, dims, guided_teacher, font_small, font_medium, alpha=overlay_alpha_current)
     if guided_mode and teaching_mode:
@@ -135,8 +141,9 @@ def midi_listener():
             print(msg)
             all_midi_events.append(msg.copy(time=time.time()))
             if msg.type == "note_on" and msg.velocity > 0:
-                pressed_keys[msg.note] = True
-                pressed_fade_keys[msg.note] = pygame.time.get_ticks()
+                with state_lock:
+                    pressed_keys[msg.note] = True
+                    pressed_fade_keys[msg.note] = pygame.time.get_ticks()
                 pressed_notes_set.add(msg.note)
                 msg.time = time.time()
                 if teaching_mode:
@@ -152,15 +159,17 @@ def midi_listener():
                     if synth_enabled:
                         synth.note_on(msg.note, msg.velocity)
             elif msg.type in ("note_off", "note_on"):
-                pressed_keys[msg.note] = False
-                pressed_fade_keys.pop(msg.note, None)
+                with state_lock:
+                    pressed_keys[msg.note] = False
+                    pressed_fade_keys.pop(msg.note, None)
                 pressed_notes_set.discard(msg.note)
                 if synth_enabled:
                     synth.note_off(msg.note)
             elif msg.type == "control_change":
                 for pedal, cc in PEDAL_CC.items():
                     if msg.control == cc:
-                        pedals[pedal] = msg.value >= 64
+                        with state_lock:
+                            pedals[pedal] = msg.value >= 64
                         if synth_enabled:
                             synth.pedal_cc(msg.control, msg.value)
 
