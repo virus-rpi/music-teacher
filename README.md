@@ -65,7 +65,7 @@ SOUNDFONT_PATH = "/path/to/your/soundfont.sf2"
 If installed as a package:
 ```bash
 # Run the application
-music-teacher
+uv run music-teacher
 ```
 
 Or from the source directory:
@@ -113,3 +113,7 @@ Teaching mode toggled off:
 ## Contributing
 
 Contributions are welcome! Feel free to submit issues and pull requests.
+
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
