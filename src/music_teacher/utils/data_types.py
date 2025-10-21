@@ -19,16 +19,6 @@ class Note:
     velocity: int
     mark: Optional[str] = None
 
-    def copy(self, **kwargs):
-        return Note(
-            pitch=kwargs.get("pitch", self.pitch),
-            onset_ms=kwargs.get("onset_ms", self.onset_ms),
-            duration_ms=kwargs.get("duration_ms", self.duration_ms),
-            velocity=kwargs.get("velocity", self.velocity),
-            mark=kwargs.get("mark", self.mark),
-        )
-
-
 @dataclass
 class PedalEvent:
     """Represents a pedal control change event."""
@@ -36,13 +26,6 @@ class PedalEvent:
     time_ms: int
     value: int
     pedal_type: pedal_type
-
-    def copy(self, **kwargs):
-        return PedalEvent(
-            time_ms=kwargs.get("time_ms", self.time_ms),
-            value=kwargs.get("value", self.value),
-            pedal_type=kwargs.get("pedal_type", self.pedal_type),
-        )
 
 
 @dataclass

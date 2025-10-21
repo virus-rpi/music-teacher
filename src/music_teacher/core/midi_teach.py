@@ -1,5 +1,6 @@
 import time
 from bisect import bisect_left, bisect_right
+from dataclasses import replace
 import mido
 from ..utils.save_system import SaveSystem
 from ..ui.sheet_music import SheetMusicRenderer
@@ -437,10 +438,10 @@ class MidiTeacher:
                 mark="rh" if track_idx == 0 else "lh" if track_idx == 1 else "unknown",
             )
             notes = list(
-                map(lambda n: n.copy(onset_ms=int(self._tick_to_ms(n.onset_ms))), notes)
+                map(lambda n: replace(n, onset_ms=int(self._tick_to_ms(n.onset_ms))), notes)
             )
             pedals = list(
-                map(lambda p: p.copy(time_ms=int(self._tick_to_ms(p.time_ms))), pedals)
+                map(lambda p: replace(p, time_ms=int(self._tick_to_ms(p.time_ms))), pedals)
             )
             self._preprocessed_notes.append(notes)
             self._preprocessed_pedals.append(pedals)
