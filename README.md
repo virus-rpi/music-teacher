@@ -1,4 +1,4 @@
-# MIDI Piano Visualizer & Teacher
+# Music Teacher
 
 A real-time MIDI piano visualizer and teaching tool, designed for use with a MIDI keyboard and SoundFont synthesizer. This application displays a virtual piano, sheet music, and interactive overlays to help users learn and practice piano pieces from MIDI files.
 This is still a work in progress and use may need some tinkering.  
@@ -30,32 +30,51 @@ Help is appreciated!
 - **Hand placement hints**: Add an algorithm to calculate the optimal hand placement for comfort and ease of switching between cords.
 - **Improved Sheet Music Rendering**: Remove duplicate clefs and make sure the height stays consistent.
 - **More Tips**: Add more tips for improving your score, including techniques for how to play certain things better (e.g. how to play fast consecutive notes)
-- **Rythmgame Mode**: Let the notes scroll down as bars and let the user play them as they appear.
+- **Rhythm Game Mode**: Let the notes scroll down as bars and let the user play them as they appear.
 
-## Usage
+
+## Installation
 
 ### Requirements
 - Python 3.13+
-- uv package manager
 - A SoundFont file (e.g., GeneralUser-GS.sf2)
-- A MIDI file to teach
+- A MIDI file to learn with two tracks (right hand and left hand seperated)
 - A MIDI output-capable keyboard
 
-Install dependencies:
+### Install with uv
 ```bash
+# Clone the repository
+git clone https://github.com/yourusername/music-teacher.git
+cd music-teacher
 uv sync
+```
+
+## Usage
+
+### Configuration
+Before running the application, you'll need to specify the path to your SoundFont file. 
+
+Edit `src/music_teacher/core/app.py` and update the `SOUNDFONT_PATH` variable:
+
+```python
+SOUNDFONT_PATH = "/path/to/your/soundfont.sf2"
 ```
 
 ### Running the Application
 
-1. Place your SoundFont and MIDI files in accessible locations.
-2. Edit `main.py` to set the correct paths for `SOUNDFONT_PATH`.
-3. Connect your MIDI keyboard.
-4. Run the application:
-   ```bash
-   uv run main.py
-   ```
-5. Enter the path to your MIDI file when prompted (will be copied into the save file)
+If installed as a package:
+```bash
+# Run the application
+music-teacher
+```
+
+Or from the source directory:
+```bash
+# Run directly from source
+python src/main.py
+```
+
+When prompted, enter the path to your MIDI file.
 
 ### Controls
 
@@ -88,18 +107,9 @@ Teaching mode:
 Guided teaching mode:
 <img width="1920" height="1045" alt="image" src="https://github.com/user-attachments/assets/0860b2a6-9ed9-4ec5-bd3e-3ea55650abb3" />
 
-Teaching mode toogled off:
+Teaching mode toggled off:
 <img width="1920" height="1045" alt="image" src="https://github.com/user-attachments/assets/22544b29-0f48-420c-84be-bd705e078ae9" />
 
+## Contributing
 
-## File Structure
-- `main.py`: Main application loop and UI
-- `synth.py`: SoundFont synthesizer
-- `midi_teach.py`: Teaching logic
-- `sheet_music.py`, `sheet_music_renderer.py`: Sheet music rendering
-- `guided_teacher.py`: Guided mode overlays and logic
-- `visual.py`: Piano and UI drawing
-- `analytics_popup.py`: Popup for advanced analytics
-- `flexbox.py`: Flexbox layout helper for the analytics popup
-- `save_system.py`: Save system for the state and midi file
-
+Contributions are welcome! Feel free to submit issues and pull requests.
