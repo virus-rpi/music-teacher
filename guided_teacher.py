@@ -309,7 +309,7 @@ class GuidedTeacher:
 
         if not self.current_task and self.tasks:
             self.next_task()
-        if not self.current_task:
+        if self.current_task:
             self.current_task.on_tick(pressed_notes, midi_events, pygame_events)
 
         for event in pygame_events:
