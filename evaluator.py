@@ -23,6 +23,14 @@ weights = {
 assert sum(weights.values()) == 1.0, "Weights must sum to 1.0"
 
 def _match_notes(ref_notes: list[Note], rec_notes: list[Note]) -> tuple[list[tuple[Note, Optional[Note]]], list[Note], float]:
+    """
+    Match reference notes to recorded notes and return matched pairs, unmatched recorded notes, and a temporal scale factor.
+    
+    Returns:
+        matches (list[tuple[Note, Optional[Note]]]): Tuples pairing each reference Note with the matched recorded Note, or `None` when a reference note was not played.
+        extras (list[Note]): Recorded notes that were not matched to any reference note.
+        scale (float): Temporal scale factor applied to recorded onsets to align with the reference (reference span divided by recording span; 1.0 when alignment is undefined, 0.0 when there are no recordings).
+    """
     if not ref_notes:
         return [], rec_notes.copy(), 1.0
     if not rec_notes:
@@ -51,6 +59,16 @@ def _match_notes(ref_notes: list[Note], rec_notes: list[Note]) -> tuple[list[tup
 
     onset_w, pitch_w, dur_w, k = 0.001, 3.0, 0.05, 15.0
     def weighted_distance(a, b):
+        """
+        Compute a weighted distance between two notes based on pitch, onset, and offset times.
+        
+        Parameters:
+            a: The first note object or None. Expected to have `pitch`, `onset_ms`, and `duration_ms` attributes.
+            b: The second note object or None. Expected to have `pitch`, `onset_ms`, and `duration_ms` attributes.
+        
+        Returns:
+            A numeric score representing dissimilarity; a larger value means more different. If either `a` or `b` is `None`, returns a large constant indicating no valid match.
+        """
         if a is None or b is None:
             return k
         return (
@@ -80,7 +98,14 @@ def _match_notes(ref_notes: list[Note], rec_notes: list[Note]) -> tuple[list[tup
 
 def _detect_articulation(duration: float, reference_duration: int) -> articulation_type:
     """
-    Classify note articulation relative to reference.
+    Classifies a note's articulation compared to a reference duration.
+    
+    Parameters:
+        duration (float): Measured duration of the played note (same time units as reference_duration).
+        reference_duration (int): Expected/reference duration for the note.
+    
+    Returns:
+        articulation_type: `'staccato'` if duration is less than 50% of reference, `'legato'` if duration is greater than 120% of reference, `'normal'` otherwise.
     """
     ratio = duration / (reference_duration + 1e-6)
     if ratio < 0.5:
@@ -90,6 +115,16 @@ def _detect_articulation(duration: float, reference_duration: int) -> articulati
     return "normal"
 
 def _evaluate_pedal_use(ref_pedals: list[PedalEvent], rec_pedals: list[PedalEvent], evaluation: PerformanceEvaluation):
+    """
+    Compare reference and recorded pedal event streams, append pedal-related Issue entries to the evaluation, and set evaluation.pedal_score.
+    
+    Groups events by pedal type, quantizes times to 50 ms buckets, and aligns reference and recorded sequences using a sequence matcher. For mismatches, missing events, and extra events the function appends Issue objects with a time_ms, computed severity (based on timing and value differences or fixed severities), and a descriptive message. Finally, sets evaluation.pedal_score to 1.0 - (issues / total) clamped at a minimum of 0.0; if there are no pedal events, sets pedal_score to 1.0.
+    
+    Parameters:
+        ref_pedals (list[PedalEvent]): Reference pedal events to compare.
+        rec_pedals (list[PedalEvent]): Recorded pedal events to compare.
+        evaluation (PerformanceEvaluation): Mutable evaluation object to which pedal issues are appended and whose pedal_score is set.
+    """
     ref_by_type = defaultdict(list)
     rec_by_type = defaultdict(list)
     for p in ref_pedals:
@@ -173,6 +208,15 @@ def _evaluate_pedal_use(ref_pedals: list[PedalEvent], rec_pedals: list[PedalEven
         evaluation.pedal_score = 1.0
 
 def _pitch_to_name(pitch: int) -> str:
+    """
+    Convert a MIDI pitch number to a musical pitch name with octave.
+    
+    Parameters:
+        pitch (int): MIDI note number (typically 0–127); 60 corresponds to C4.
+    
+    Returns:
+        str: Pitch name with octave (e.g., "C4", "F#3").
+    """
     names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
     octave = (pitch // 12) - 1
     name = names[pitch % 12]
@@ -180,6 +224,15 @@ def _pitch_to_name(pitch: int) -> str:
 
 
 def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
+    """
+    Generate prioritized coaching tips and an encouragement message from a performance evaluation.
+    
+    Parameters:
+        ev (PerformanceEvaluation): Evaluation containing per-note metrics, aggregate scores, detected issues, and hand summaries.
+    
+    Returns:
+        tuple[list[str], str]: A pair where the first element is a list of user-facing tip strings sorted by priority (highest first), and the second element is a short encouragement message based on the overall score.
+    """
     tips = []
 
     if ev.tempo_deviation_ratio < 0.95:
@@ -309,22 +362,51 @@ def _generate_tips(ev: PerformanceEvaluation) -> tuple[list[str], str]:
 
 class Evaluator:
     def __init__(self, recording: MidiTrack, reference: tuple[list[Note], list[PedalEvent]]):
+        """
+        Initialize the Evaluator with a recorded MIDI track and its reference data.
+        
+        Parameters:
+            recording (MidiTrack): The recorded MIDI track to be evaluated.
+            reference (tuple[list[Note], list[PedalEvent]]): A tuple containing the reference note list (score notes in order) and the reference pedal event list.
+        
+        Notes:
+            Caches an evaluation result in `_evaluation`, initialized to `None` for lazy computation.
+        """
         self.recording: MidiTrack = recording
         self.reference: tuple[list[Note], list[PedalEvent]] = reference
         self._evaluation: Optional[PerformanceEvaluation] = None
 
     @property
     def full_evaluation(self) -> PerformanceEvaluation:
+        """
+        Provide the complete PerformanceEvaluation for the recording, computing and caching it on first access.
+        
+        Returns:
+            PerformanceEvaluation: The computed evaluation containing per-note metrics, aggregated scores, issues, pedal analysis, and hand summaries.
+        """
         if not self._evaluation:
             self._evaluate()
         return self._evaluation
 
     @property
     def score(self) -> float:
+        """
+        Overall weighted performance score for the evaluated recording.
+        
+        Returns:
+            overall_score (float): Aggregate score between 0.0 and 1.0 representing the performance quality computed from accuracy, timing, dynamics, articulation, pedal use, and tempo.
+        """
         return self.full_evaluation.overall_score
 
     @property
     def tip(self) -> str:
+        """
+        Return a short coaching message combining an encouragement and the highest-priority tip for the current evaluation.
+        
+        If the evaluation has no cached comments, this method generates and stores tip messages (and an encouragement) before returning the result. The returned string is the encouragement followed by the first tip; if no tips are available, returns "Perfect performance!".
+        Returns:
+        	A single string containing the encouragement and the top tip, or "Perfect performance!" if no tips exist.
+        """
         evaluation = self.full_evaluation
         encouragement = ""
         if not evaluation.comments:
@@ -332,6 +414,11 @@ class Evaluator:
         return encouragement + str(evaluation.comments[0]) if evaluation.comments else encouragement.strip() or "Perfect performance!"
 
     def _evaluate(self):
+        """
+        Run a full performance evaluation of the current recording against the reference and store the resulting PerformanceEvaluation on the instance.
+        
+        Performs note-to-note alignment between reference and recorded notes, compares pitch, timing, duration, velocity, and articulation for each matched note, detects missing and extra notes, evaluates pedal usage, and aggregates per-note metrics into summary scores (accuracy, timing, dynamics, articulation, pedal, tempo) and hand-specific issue summaries. The completed PerformanceEvaluation is assigned to self._evaluation and also printed for inspection.
+        """
         rec_notes, rec_pedals = extract_notes_and_pedal(self.recording)
         ref_all, ref_pedals = self.reference
 

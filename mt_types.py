@@ -19,6 +19,20 @@ class Note:
     mark: Optional[str] = None
 
     def copy(self, **kwargs):
+        """
+        Return a copy of the Note with any provided fields replaced.
+        
+        Parameters:
+            **kwargs: Optional fields to override on the copied Note. Accepted keys are:
+                pitch (int): MIDI pitch value.
+                onset_ms (int): Onset time in milliseconds.
+                duration_ms (int): Duration in milliseconds.
+                velocity (int): Note velocity.
+                mark (Optional[str]): Optional mark or annotation.
+        
+        Returns:
+            Note: A new Note instance with fields taken from `kwargs` when provided, otherwise copied from the original.
+        """
         return Note(
             pitch=kwargs.get('pitch', self.pitch),
             onset_ms=kwargs.get('onset_ms', self.onset_ms),
@@ -36,6 +50,18 @@ class PedalEvent:
     pedal_type: pedal_type
 
     def copy(self, **kwargs):
+        """
+        Create a new PedalEvent with one or more fields replaced by the supplied keyword arguments.
+        
+        Parameters:
+            **kwargs: Optional overrides for fields of the new PedalEvent. Supported keys are:
+                time_ms (int): Event time in milliseconds.
+                value (int): Control value (typically 0–127).
+                pedal_type (pedal_type): Type of pedal, e.g., "sustain", "sostenuto", or "soft".
+        
+        Returns:
+            PedalEvent: A new PedalEvent instance with fields taken from `kwargs` when provided, otherwise copied from the original.
+        """
         return PedalEvent(
             time_ms=kwargs.get('time_ms', self.time_ms),
             value=kwargs.get('value', self.value),
@@ -111,4 +137,3 @@ class PerformanceEvaluation:
     articulation_score: float = 0.0
     pedal_score: float = 0.0
     comments: Optional[list[str]] = None
-

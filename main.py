@@ -124,6 +124,13 @@ midi_teacher = MidiTeacher(midi_path, sheet_music_renderer, save_system=save_sys
 guided_teacher = GuidedTeacher(midi_teacher, synth, save_system=save_system)
 
 def midi_listener():
+    """
+    Listen to the selected MIDI input port and update program state from incoming MIDI messages.
+    
+    Each incoming MIDI message is appended to `all_midi_events` with a timestamp. Note-on messages with velocity > 0 mark keys as pressed (`pressed_keys`, `pressed_fade_keys`, and `pressed_notes_set`) and, depending on `teaching_mode`, either validate the note against the teacher and play the note or an error sound via `synth`, and trigger teacher advancement when appropriate, or simply play the note when not teaching. Note-off messages (and note-on messages with velocity 0) clear pressed state and stop the note on the `synth` when enabled. Control-change messages update pedal states in `pedals` and forward pedal CC values to the `synth` when enabled.
+    
+    If no MIDI input port is available, the function logs that no input was found and returns without opening a port.
+    """
     try:
         port_name = mido.get_input_names()[1]
         print(f"Opening MIDI input: {port_name}")

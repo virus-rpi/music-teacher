@@ -19,11 +19,28 @@ import pygame_gui
 # TODO: add toggle for relative or absolute timing in the piano roll (separate or merged x normalization)
 
 def _render_background(surface):
+    """
+    Draws a dark rounded-rectangle background with a light rounded border onto the given surface.
+    
+    Parameters:
+        surface (pygame.Surface): Target surface to render the background on.
+    """
     pygame.draw.rect(surface, (30, 30, 30), (0, 0, surface.get_width(), surface.get_height()), border_radius=16)
     pygame.draw.rect(surface, (200, 200, 200), (0, 0, surface.get_width(), surface.get_height()), 2, border_radius=16)
 
 
 def _generate_tips(evaluation: PerformanceEvaluation) -> pygame_gui.elements.UITextBox:
+    """
+    Create a UITextBox containing performance analysis tips derived from a PerformanceEvaluation.
+    
+    If `evaluation` is falsy or has no comments, the textbox contains a brief "No analytics available." message; otherwise the textbox contains a header and each comment from `evaluation.comments` rendered as HTML/text lines.
+    
+    Parameters:
+        evaluation (PerformanceEvaluation): Evaluation object whose `comments` list will be used to populate the tips.
+    
+    Returns:
+        pygame_gui.elements.UITextBox: A UI text box element containing the generated tips or a placeholder message.
+    """
     if not evaluation or not evaluation.comments:
         return pygame_gui.elements.UITextBox(
             html_text='<i>No analytics available.</i>',
@@ -43,6 +60,14 @@ def _generate_tips(evaluation: PerformanceEvaluation) -> pygame_gui.elements.UIT
 
 
 def _render_overall_score(evaluation: PerformanceEvaluation, big_font, flex_box):
+    """
+    Render and place a color-coded overall performance score into the provided FlexBox.
+    
+    If `evaluation` contains an overall_score, formats it as a percentage and displays it; otherwise displays a placeholder. The displayed text is colored green when the score is greater than or equal to 0.8 and red otherwise, and is rendered using `big_font` then inserted into `flex_box` as an image element.
+    
+    Parameters:
+        evaluation (PerformanceEvaluation | None): Source of the overall_score; may be None or have no score.
+    """
     score_val = evaluation.overall_score if evaluation else None
     if score_val is not None:
         score_text = f"Overall Score: {score_val * 100:.0f}%"
@@ -61,6 +86,17 @@ def _render_overall_score(evaluation: PerformanceEvaluation, big_font, flex_box)
 
 
 def _matplotlib_spider_chart(evaluation: PerformanceEvaluation, width, height):
+    """
+    Render a radar (spider) chart of a PerformanceEvaluation's metrics and return it as a pygame image.
+    
+    Parameters:
+        evaluation (PerformanceEvaluation): Source of metric scores (accuracy, timing, dynamics, articulation, pedal, tempo accuracy), each expected between 0 and 1.
+        width (int): Width of the produced image in pixels.
+        height (int): Height of the produced image in pixels.
+    
+    Returns:
+        pygame.Surface: An image surface containing the rendered radar chart with a transparent background.
+    """
     labels = np.array(['Accuracy', 'Timing', 'Dynamics', 'Articulation', 'Pedal', 'Tempo'])
     values = np.array([
         evaluation.accuracy_score,
@@ -129,6 +165,13 @@ class ElementSurface:
 
 class AnalyticsPopup:
     def __init__(self, teacher, save_system: SaveSystem):
+        """
+        Create an AnalyticsPopup tied to a specific teacher and SaveSystem, initializing UI state, fonts, and internal selectors.
+        
+        Parameters:
+            teacher: Object providing teacher-specific data (e.g., MIDI/expected notes and metadata) used by the popup.
+            save_system (SaveSystem): Persistence helper used to locate and load guided teacher data and section files.
+        """
         self.teacher = teacher
         self.save_system = save_system
         self.visible = False
@@ -164,6 +207,14 @@ class AnalyticsPopup:
             self._update()
 
     def draw(self, surface: pygame.Surface):
+        """
+        Render the analytics popup onto the provided pygame surface when the popup is visible.
+        
+        When visible, this method creates an offscreen drawing area aligned inside the given surface, ensures the UI manager's resolution and offset match that area, draws the popup background, lazily constructs the main UI container and left-side panel (title, overall score, radar chart placeholder, pianoroll, and tips) when needed, and then advances and draws the pygame_gui UI. It also updates internal timing state used for UI animations.
+        
+        Parameters:
+            surface (pygame.Surface): Target surface to render the popup onto.
+        """
         if not self.visible:
             return
 
@@ -202,6 +253,11 @@ class AnalyticsPopup:
             self._ui_manager.draw_ui(e)
 
     def _update(self):
+        """
+        Refresh the popup's dropdown UI elements and reload the currently selected evaluation.
+        
+        Kills any existing measure/section/pass selector widgets and the dropdown container, clears container references, and updates self._evaluation by calling _get_selected_evaluation().
+        """
         if self._measure_selector:
             self._measure_selector.kill()
         if self._section_selector:
@@ -217,6 +273,14 @@ class AnalyticsPopup:
         self._evaluation = self._get_selected_evaluation()
 
     def handle_event(self, event):
+        """
+        Handle a Pygame event for the analytics popup, updating selection state when dropdowns change.
+        
+        If the popup is visible, the event is forwarded to the internal UI manager; when a measure, section, or pass dropdown change event is received, update the corresponding selection fields (_selected_measure, _selected_section, _selected_pass) and refresh the UI via _update().
+        
+        Parameters:
+            event (pygame.event.Event): The incoming Pygame event to handle. No value is returned.
+        """
         if not self.visible:
             return
 
@@ -298,6 +362,14 @@ class AnalyticsPopup:
         self._dropdown_container.place_element(self._pass_selector, height_percent=1, width_px=140)
 
     def _build_path_map(self):
+        """
+        Builds a hierarchical map of available guided-teacher pass files and initializes the current selection.
+        
+        Searches the save system for guided_teacher_data pass JSON files, organizes them into self.pass_map keyed by
+        measure -> section -> pass number with values of their relative file paths, and resets selection state.
+        If any entries are found, sets self._selected_measure, self._selected_section, and self._selected_pass to the
+        first discovered measure, section, and pass respectively.
+        """
         self._selected_measure = None
         self._selected_section = None
         self._selected_pass = None
@@ -318,6 +390,14 @@ class AnalyticsPopup:
                     self._selected_pass = pass_num
 
     def _get_selected_evaluation(self):
+        """
+        Load the PerformanceEvaluation corresponding to the currently selected measure, section, and pass.
+        
+        If a selection path is not available in self.pass_map, returns an empty dict. Otherwise opens the guided teacher data file for the selected path and returns a PerformanceEvaluation constructed from the file's 'evaluation' field; if that field is missing or empty, returns an empty PerformanceEvaluation.
+        
+        Returns:
+            PerformanceEvaluation | dict: A PerformanceEvaluation built from the selected file's evaluation data, an empty PerformanceEvaluation if the file has no evaluation, or an empty dict when no selection path exists.
+        """
         if not (self.pass_map and self.pass_map[self._selected_measure] and self.pass_map[self._selected_measure][
             self._selected_section] and self.pass_map[self._selected_measure][self._selected_section][
                     self._selected_pass]):
@@ -329,6 +409,14 @@ class AnalyticsPopup:
             return PerformanceEvaluation(**evaluation) if evaluation else PerformanceEvaluation()
 
     def _render_pianoroll(self, flexbox: FlexBox):
+        """
+        Render a pianoroll visualization into the provided FlexBox using the current selection.
+        
+        Renders an image element into the flexbox that visualizes expected notes (from the teacher's MIDI data for the current measure/section) and performed MIDI events (for the selected pass). The visualization maps note pitch to vertical position and onset/duration to horizontal position, highlights large pitch gaps, draws expected notes with hand-specific coloring, and overlays performed notes with a distinct color. If there are no expected or performed notes for the current selection, the method returns without modifying the UI.
+        
+        Parameters:
+            flexbox (FlexBox): Container used to place the generated UIImage element for the pianoroll.
+        """
         surface_element = pygame_gui.elements.UIImage(
             image_surface=pygame.Surface((100, 100), pygame.SRCALPHA),
             relative_rect=pygame.Rect(0, 0, 100, 100),
@@ -409,10 +497,28 @@ class AnalyticsPopup:
         performed_time_range = max_performed_time - min_performed_time if max_performed_time > min_performed_time else 1
 
         def expected_time_to_x(time_ms):
+            """
+            Map an expected time in milliseconds to an x-coordinate within the pianoroll drawing rectangle.
+            
+            Parameters:
+                time_ms (float | int): Time in milliseconds to convert to an x position.
+            
+            Returns:
+                float: X coordinate in pixels within `rect` where the expected time should be rendered. If the expected time range is zero or negative, returns the start x offset inside `rect`.
+            """
             norm = (time_ms - min_expected_time) / expected_time_range if expected_time_range > 0 else 0
             return (rect.left + 12) + norm * (rect.width - 32)
 
         def performed_time_to_x(time_ms):
+            """
+            Map a performed event time (milliseconds) to an x-coordinate within the pianoroll drawing rect.
+            
+            Parameters:
+                time_ms (float): Time of the performed event in milliseconds relative to the section.
+            
+            Returns:
+                float: X position (in pixels) inside the pianoroll rect corresponding to the given time. If the time range is zero, returns the left-side inset position.
+            """
             norm = (time_ms - min_performed_time) / performed_time_range if performed_time_range > 0 else 0
             return (rect.left + 12) + norm * (rect.width - 32)
 
@@ -450,9 +556,19 @@ class AnalyticsPopup:
         surface_element.set_image(surface)
 
     def _get_section_bounds(self):
+        """
+        Retrieve the start and end indices for the currently selected section as an exclusive range.
+        
+        Loads the section metadata for the current measure and section from the guided teacher data and returns a tuple suitable for slicing: (start_index, end_index_exclusive).
+        
+        Returns:
+            tuple[int, int]: A pair where the first element is the section's start index and the second is the section's end index plus one (end exclusive).
+        
+        Raises:
+            FileNotFoundError: If the section JSON is not present for the selected measure and section.
+        """
         with self.save_system.guided_teacher_data as s:
             if not s.file_exists(f"measure_{self._selected_measure}/section_{self._selected_section}/section.json"):
                 raise FileNotFoundError(f"Section {self._selected_section} not found in measure {self._selected_measure}")
             info = json.loads(s.load_file(f"measure_{self._selected_measure}/section_{self._selected_section}/section.json"))["section"]
             return info["start_idx"], info["end_idx"]+1
-

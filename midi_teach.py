@@ -20,6 +20,16 @@ class MeasureData:
 
 class MidiTeacher:
     def __init__(self, midi_path, sheet_music_renderer: SheetMusicRenderer, save_system: SaveSystem = None):
+        """
+        Initialize the MidiTeacher, load and preprocess the MIDI file, and prepare playback and measure state.
+        
+        Initializes internal playback state (current index, pending notes, loop settings), loads the MIDI file (using the provided SaveSystem if it supplies an override path), extracts chord events and their times, builds the tempo map, preprocesses per-track message and note/pedal indices for fast time-range queries, and populates measure data from the sheet music renderer.
+        
+        Parameters:
+            midi_path (str): Path to the MIDI file to load; overridden if `save_system.load_midi_path()` returns a non-empty value.
+            sheet_music_renderer (SheetMusicRenderer): Renderer used to compute measure layout and positions.
+            save_system (SaveSystem, optional): Persistence helper used to load/save user data and (optionally) a MIDI path. If omitted, a default SaveSystem is created.
+        """
         self.save_system = save_system or SaveSystem()
         self.midi_path = self.save_system.load_midi_path() or midi_path
         self.sheet_music_renderer = sheet_music_renderer
@@ -39,6 +49,19 @@ class MidiTeacher:
         self._set_measure_data()
 
     def _extract_chords(self):
+        """
+        Extracts chords and their onset ticks from the loaded MIDI file.
+        
+        Scans all tracks for note on/off events, groups simultaneous onsets into chords, and assigns each note a hand label based on track prominence. Also records per-note onset and offset ticks when available.
+        
+        Returns:
+            tuple: (chords, times)
+                - chords (list[list[tuple[int, str]]]): List of chords; each chord is a list of (note, hand) tuples where `note` is the MIDI note number and `hand` is 'L' or 'R'.
+                - times (list[int]): List of absolute onset ticks corresponding to each chord.
+        
+        Side effects:
+            Populates self.chord_notes_with_durations with a list per chord of (note, hand, onset_tick, offset_tick).
+        """
         timer = time.perf_counter()
         events = []
         note_on_times = {}
@@ -295,6 +318,18 @@ class MidiTeacher:
         return measure_boundaries
 
     def _set_measure_data(self):
+        """
+        Populate self.measures with MeasureData objects describing sheet-music measures and the chords that lie within each measure.
+        
+        For each renderer-provided measure, associates chord indices whose onset ticks fall inside the measure's tick boundaries and stores:
+        - chords: tuple of chord entries for that measure,
+        - times: tuple of chord onset times expressed as ticks relative to the measure start,
+        - xs: tuple of notehead x positions when available,
+        - start_x / end_x: renderer-provided horizontal bounds for the measure,
+        - start_index / end_index: inclusive start index and exclusive end index into the global chord list for the measure.
+        
+        If no sheet_music_renderer is available, or a measure entry is missing/invalid, an empty MeasureData is appended for that measure. Measures that contain no chords yield start_index == end_index positioned at the current chord scan location.
+        """
         timer = time.perf_counter()
         if not self.sheet_music_renderer:
             return
@@ -364,7 +399,11 @@ class MidiTeacher:
             return []
 
     def _preprocess_track_indices(self):
-        """Preprocess each track to build a tuple (time_ms, msg_list) for fast range queries."""
+        """
+        Builds per-track indices mapping absolute message times to message lists for fast time-range queries.
+        
+        For each MIDI track, computes absolute millisecond timestamps for every message and produces a parallel list of message copies whose `time` field is the message's delta time expressed in milliseconds. Stores a list of (times_ms, msg_list) tuples on `self._track_msg_indices`, where `times_ms` is a list of absolute times in milliseconds and `msg_list` is the corresponding list of copied messages. Also prints the preprocessing duration.
+        """
         timer = time.perf_counter()
         self._track_msg_indices = []
         for track in self.midi.tracks:
@@ -380,6 +419,17 @@ class MidiTeacher:
         print(f"Preprocessed track message indices in {time.perf_counter() - timer:.3f} seconds")
 
     def _preprocess_notes_and_pedals(self):
+        """
+        Precomputes per-track note and pedal timing in milliseconds and stores indexable structures for fast range queries.
+        
+        Converts extracted Note.onset_ms and PedalEvent.time_ms from ticks to integer milliseconds for every MIDI track, and stores:
+        - self._preprocessed_notes: list of per-track lists of Note objects with onset_ms in ms
+        - self._preprocessed_pedals: list of per-track lists of PedalEvent objects with time_ms in ms
+        - self._note_onset_indices: list of per-track lists of integer onset_ms values (for bisect queries)
+        - self._pedal_time_indices: list of per-track lists of integer time_ms values (for bisect queries)
+        
+        This method mutates the above attributes and does not return a value.
+        """
         timer = time.perf_counter()
         self._preprocessed_notes: list[list[Note]] = []
         self._preprocessed_pedals: list[list[PedalEvent]] = []
@@ -398,6 +448,18 @@ class MidiTeacher:
         print(f"Preprocessed notes and pedals in {time.perf_counter() - timer:.3f} seconds")
 
     def query_notes_and_pedals(self, start_idx: int, end_idx: int) -> tuple[list[Note], list[PedalEvent]]:
+        """
+        Return notes and sustain pedal events whose onsets fall between two chord indices.
+        
+        The window includes events with onset time greater than or equal to the start chord's onset and strictly less than the end chord's onset. If end_idx is greater than or equal to the last chord index, the window extends to the end of the MIDI. Results are aggregated across all tracks and returned sorted by onset time.
+        
+        Parameters:
+            start_idx (int): Index of the starting chord (inclusive).
+            end_idx (int): Index of the ending chord (exclusive).
+        
+        Returns:
+            tuple[list[Note], list[PedalEvent]]: A pair where the first element is a list of Note objects and the second is a list of PedalEvent objects; both lists are sorted by their `onset_ms` / `time_ms` fields.
+        """
         if not hasattr(self, '_preprocessed_notes'):
             return [], []
         start_ms = int(round(self._tick_to_ms(self.chord_times[start_idx])))

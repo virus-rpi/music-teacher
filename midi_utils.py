@@ -4,6 +4,20 @@ from mt_types import Note, PedalEvent, pedal_type
 
 
 def extract_notes_and_pedal(track: MidiTrack, mark: Optional[str] = None) -> tuple[list[Note], list[PedalEvent]]:
+    """
+    Extract note events and pedal control changes from a MIDI track, returning notes with absolute onset and duration and pedal events with absolute times relative to the track start.
+    
+    Parameters:
+        track (MidiTrack): MIDI track to parse.
+        mark (Optional[str]): Optional label to attach to each returned Note.
+    
+    Returns:
+        tuple[list[Note], list[PedalEvent]]: A tuple where the first element is a list of Note objects (pitch, onset_ms, duration_ms, velocity, mark) and the second element is a list of PedalEvent objects (time_ms, value, pedal_type). Notes and pedal times are measured from the start of the track in the same time units provided by the track messages.
+    
+    Notes:
+        - If the same pitch receives a new note-on while it is already active, the previously active note is closed at that time.
+        - Any notes still active at the end of the track are closed at the track's final time and included in the returned notes.
+    """
     notes = []
     pedals = []
     current_time = 0
@@ -45,4 +59,3 @@ def extract_notes_and_pedal(track: MidiTrack, mark: Optional[str] = None) -> tup
         ))
 
     return notes, pedals
-

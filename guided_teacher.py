@@ -35,10 +35,25 @@ class Task(ABC):
 
     @abstractmethod
     def on_end(self):
+        """
+        Perform any teardown when the task finishes.
+        
+        Called when the task is being ended to allow subclasses to clear state, stop ongoing actions, or release resources established in on_start.
+        """
         pass
 
     @abstractmethod
     def on_tick(self, pressed_notes: set[int], midi_events: list[mido.Message], pygame_events: list[pygame.event.Event]):
+        """
+        Handle a single update cycle for the task.
+        
+        Called once per frame with the current input snapshot so the task can update its internal state, respond to user input, and progress its workflow.
+        
+        Parameters:
+            pressed_notes (set[int]): Currently held MIDI note numbers.
+            midi_events (list[mido.Message]): MIDI messages received since the last tick.
+            pygame_events (list[pygame.event.Event]): Pygame events received since the last tick.
+        """
         pass
 
 class PlaybackMeasureTask(Task):
@@ -67,6 +82,22 @@ class PlaybackMeasureTask(Task):
 
 class PracticeSectionTask(Task):
     def __init__(self, teacher: 'GuidedTeacher', section: MeasureSection, measure):
+        """
+        Initialize a PracticeSectionTask for a specific section of a measure.
+        
+        Parameters:
+            teacher: The GuidedTeacher coordinating tasks and shared state.
+            section: MeasureSection describing chords, times, xs, start_idx, and end_idx for this practice segment.
+            measure: Identifier or object for the parent measure containing the section.
+        
+        The constructor sets up:
+            - section and measure references and extracts start_idx and end_idx.
+            - section_index: the index of this section within the measure's split sections, or `None` if not found.
+            - recording state: `recording` (empty mido.MidiTrack), timing fields (`timer_start`, `_last_record_time`), and `_prev_pressed_notes`.
+            - wrap/recording control flags: `_waiting_for_wrap_release` and `_wrap_pressed_notes`.
+        
+        These attributes are used to manage looping, input capture, and evaluation for the practice section.
+        """
         super().__init__(teacher)
         self.section = section
         self.measure = measure
@@ -92,10 +123,28 @@ class PracticeSectionTask(Task):
         self.teacher.midi_teacher.seek_to_index(self.start_idx)
 
     def on_end(self):
+        """
+        Disable looping for the MIDI teacher and clear the current section's visualization.
+         
+        This ends any active loop for the section and removes the section highlight used by the UI.
+        """
         self.teacher.midi_teacher.loop_enabled = False
         self.teacher.current_section_visual_info = None
 
     def on_tick(self, pressed_notes, midi_events, pygame_events):
+        """
+        Handle per-frame input for the practice section, processing pygame and MIDI events and managing wrap-release evaluation flow.
+        
+        This method:
+        - Dispatches pygame and MIDI events to internal handlers.
+        - If currently waiting for a wrap-release, waits until the originally wrapped notes are released and there are no incoming MIDI events, then triggers evaluation and resets recording/timing state.
+        - If not waiting and the MIDI teacher reports a wrap-and-clear event, either triggers evaluation immediately when no notes are pressed or enters a waiting-for-release state while remembering the currently pressed notes.
+        
+        Parameters:
+            pressed_notes (set[int]): Currently pressed MIDI note numbers.
+            midi_events (list[mido.Message]): Incoming MIDI messages for this frame.
+            pygame_events (list[pygame.event.Event]): Incoming pygame events for this frame.
+        """
         self._handle_pygame_events(pygame_events)
         self._handle_midi_events(pressed_notes, midi_events)
 
@@ -125,6 +174,16 @@ class PracticeSectionTask(Task):
                 self._wrap_pressed_notes = wrap_pressed
 
     def _handle_pygame_events(self, pygame_events):
+        """
+        Handle relevant pygame key events for playback control.
+        
+        Processes the provided pygame events and triggers playback actions:
+        - Pressing R plays the entire measure associated with this task.
+        - Pressing SPACE plays the current section's chords starting at this section's start index.
+        
+        Parameters:
+            pygame_events (list[pygame.event.Event]): Events to inspect for key presses.
+        """
         for event in pygame_events:
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_r:
@@ -133,6 +192,19 @@ class PracticeSectionTask(Task):
                     self.teacher.synth.play_notes(self.section.chords, self.section.times, self.start_idx, self.teacher.midi_teacher.seek_to_index, self.teacher.midi_teacher.get_current_index())
 
     def _handle_midi_events(self, pressed_notes: set[int], midi_events: list[mido.Message]):
+        """
+        Initialize or extend the current MIDI recording with incoming MIDI messages, anchoring timing to the section's first chord and storing per-message delta times in milliseconds.
+        
+        Parameters:
+            pressed_notes (set[int]): Currently held MIDI note numbers; used to update the task's previous-pressed state.
+            midi_events (list[mido.Message]): Incoming MIDI messages; messages with timing are used to establish the recording start and are converted to messages whose `time` is the delta in milliseconds since the previous recorded event.
+        
+        Side effects:
+            - If this is the first recorded activity, sets `self.timer_start` to the earliest event time that matches any note in the section's first chord.
+            - Ensures `self._last_record_time` is initialized to the timer start when appropriate.
+            - Appends copies of incoming MIDI messages to `self.recording` with `time` replaced by the computed delta milliseconds.
+            - Updates `self._prev_pressed_notes` to a copy of `pressed_notes`.
+        """
         if len(self.recording) == 0 and len(midi_events) > 0:
             first_chord = [n[0] for n in self.section.chords[0]]
             times = [getattr(ev, 'time', None) for ev in midi_events if hasattr(ev, 'time') and hasattr(ev, 'note') and getattr(ev, 'note', None) in first_chord]
@@ -158,6 +230,11 @@ class PracticeSectionTask(Task):
         self._prev_pressed_notes = pressed_notes.copy()
 
     def _handle_evaluate(self):
+        """
+        Evaluate the current recording for the section, persist the result, and update teacher state accordingly.
+        
+        Creates an Evaluator for the current recording against the section's expected notes, stores the resulting numeric score on the teacher, and saves the pass. If the score is greater than 0.95 and auto-advance is enabled, plays the success sound, advances to the next task, and sets the guide text to "Great! " followed by the evaluator's tip; otherwise sets the guide text to the evaluator's tip.
+        """
         print(self.recording)
         evaluator = Evaluator(
             self.recording,
@@ -176,6 +253,12 @@ class PracticeSectionTask(Task):
             self.teacher.guide_text = guidance_text
 
     def _save_pass(self, evaluator):
+        """
+        Save the current section pass using the teacher's save_pass facility or log a warning if the section index is missing.
+        
+        Parameters:
+            evaluator: An object exposing `full_evaluation` (the PerformanceEvaluation) produced by the evaluator; its `full_evaluation` and the task's `recording` and `section` are passed to the teacher's save_pass.
+        """
         if self.section_index is not None:
             self.teacher.save_pass(str(self.measure), str(self.section_index), self.teacher.pass_index.get(str(self.measure), {}).get(str(self.section_index), 0), evaluator.full_evaluation,
                                    self.recording, self.section)
@@ -184,6 +267,15 @@ class PracticeSectionTask(Task):
 
 class PracticeMeasureTask(PracticeSectionTask):
     def __init__(self, teacher: 'GuidedTeacher', measure):
+        """
+        Initialize a PracticeMeasureTask that practices the entire given measure.
+        
+        Creates a MeasureSection spanning all chords in the measure, initializes the base PracticeSectionTask with it, and marks this task's section_index as "measure".
+        
+        Parameters:
+            teacher (GuidedTeacher): The GuidedTeacher coordinating tasks and providing MIDI data.
+            measure (int | str): Identifier or index of the measure to practice.
+        """
         chords, times, xs, _, (measure_start_index, _), _ = teacher.midi_teacher.get_notes_for_measure(measure)
         start_idx = measure_start_index
         end_idx = start_idx + len(chords) - 1 if chords else start_idx
@@ -193,6 +285,16 @@ class PracticeMeasureTask(PracticeSectionTask):
 
 class PracticeTransitionTask(PracticeSectionTask):
     def __init__(self, teacher, from_measure, to_measure):
+        """
+        Create a practice transition spanning the tail of one measure and the head of the next.
+        
+        Constructs a MeasureSection that consists of the last up-to-two chords from from_measure followed by the first up-to-two chords from to_measure, computes the corresponding timing and horizontal positions, determines the section's start and end MIDI indices within the original measures, initializes the PracticeSectionTask with that section and the source measure, and marks the section_index as "transition".
+        
+        Parameters:
+            teacher: The GuidedTeacher instance coordinating MIDI, playback, and state.
+            from_measure: Index or identifier of the measure to transition from.
+            to_measure: Index or identifier of the measure to transition to.
+        """
         from_chords, from_times, from_xs, _, (from_start_idx, _), _ = teacher.midi_teacher.get_notes_for_measure(from_measure)
         to_chords, to_times, to_xs, _, (to_start_idx, _), _ = teacher.midi_teacher.get_notes_for_measure(to_measure)
         section_chords = from_chords[-2:] + to_chords[:2]
@@ -205,6 +307,16 @@ class PracticeTransitionTask(PracticeSectionTask):
         self.section_index = "transition"
 
     def _handle_pygame_events(self, pygame_events):
+        """
+        Process pygame events to trigger playback controls for this transition practice.
+        
+        Responds to keydown events:
+        - R: play the current measure, wait briefly, then play the following measure.
+        - SPACE: play the notes for the current section using the teacher's synth and timing.
+        
+        Parameters:
+            pygame_events (Sequence[pygame.event.Event]): Iterable of pygame events to handle.
+        """
         for event in pygame_events:
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_r:
@@ -293,6 +405,11 @@ class GuidedTeacher:
             self.generate_tasks_for_measure(self.current_measure_index)
 
     def stop(self):
+        """
+        Stop guided practice mode and clear its runtime state.
+        
+        Disables guided mode, hides the analytics popup if visible, saves current state, clears the task queue and history, clears the current task, and restores the MIDI teacher's prior loop settings.
+        """
         if self.analytics_popup.visible: self.analytics_popup.toggle()
         self.is_active = False
         self.save_state()
@@ -302,6 +419,16 @@ class GuidedTeacher:
         self.midi_teacher.loop_enabled, self.midi_teacher.loop_start, self.midi_teacher.loop_end = self._loop_info_before
 
     def update(self, pressed_notes, midi_events, pygame_events):
+        """
+        Process incoming MIDI/keyboard events and update the guided-teaching task state for the current frame.
+        
+        This advances or navigates tasks, delegates per-frame updates to the active task, handles the analytics popup toggle and input, toggles auto-advance, and persists state.
+        
+        Parameters:
+            pressed_notes (set[int]): Currently pressed MIDI note numbers.
+            midi_events (list[mido.Message]): Incoming MIDI messages for this frame.
+            pygame_events (list[pygame.event.Event]): Pygame events (keyboard and UI events) for this frame.
+        """
         if not self.is_active:
             return
 
@@ -432,6 +559,26 @@ class GuidedTeacher:
         }
 
     def from_dict(self, d):
+        """
+        Restore the GuidedTeacher's internal state from a serialized dictionary.
+        
+        Parameters:
+            d (dict): Serialized state produced by to_dict(). Expected keys include
+                'current_measure_index', 'auto_advance', 'tasks', 'history',
+                'current_task', 'last_score', 'guide_text', and 'pass_index'. Task
+                entries should be dictionaries with a 'type' key (one of
+                'PlaybackMeasureTask', 'PracticeSectionTask', 'PracticeMeasureTask',
+                'PracticeTransitionTask', 'GenerateNextMeasureTasks') and may include
+                'measure' and 'section' fields. If a task's 'section' is a dict, it
+                will be converted to a MeasureSection instance.
+        
+        Description:
+            Updates the receiver in place by setting current_measure_index,
+            auto_advance, tasks (as a deque of task objects), history (list of tasks),
+            current_task, last_score, guide_text, and pass_index based on the provided
+            dictionary. Tasks are reconstructed into their corresponding task objects
+            and tasks/history entries that are falsy are ignored.
+        """
         def dict_to_task(td):
             if td is None:
                 return None
@@ -463,6 +610,18 @@ class GuidedTeacher:
         self.pass_index = d.get('pass_index', {})
 
     def save_pass(self, measure_idx: str, section_idx: str, pass_idx: int, evaluation: PerformanceEvaluation, recording: mido.MidiTrack, section: MeasureSection):
+        """
+        Save an evaluation and its optional MIDI recording for a specific measure and section, and increment the stored pass counter.
+        
+        Parameters:
+            measure_idx (str): Identifier for the measure (used as a directory key).
+            section_idx (str): Identifier for the section within the measure (used as a directory key).
+            pass_idx (int): Zero-based index of the pass being saved; when 0, the section metadata is also written.
+            evaluation (PerformanceEvaluation): Evaluation data to serialize and save for this pass.
+            recording (mido.MidiTrack | None): Optional MIDI track to save as a .mid file for this pass.
+            section (MeasureSection): Section metadata to save when `pass_idx` is 0.
+        
+        """
         with self.save_system as s:
             if pass_idx == 0:
                 s.save_file(f"measure_{measure_idx}/section_{section_idx}/section.json", json.dumps({'section': asdict(section), 'timestamp': time.time()}, indent=2, default=str))
