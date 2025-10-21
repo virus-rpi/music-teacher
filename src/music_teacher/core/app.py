@@ -399,7 +399,7 @@ def main():
     run()
 
     pygame.quit()
-    synth.delete()
+    if synth: synth.delete()
 
 
 if __name__ == "__main__":
