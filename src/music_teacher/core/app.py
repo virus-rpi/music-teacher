@@ -81,13 +81,12 @@ def save_all():
     try:
         if save_system is None and guided_teacher is None:
             return
-        if save_system is not None:
+        if save_system is not None and midi_path:
             save_system.save_midi(midi_path)
         if guided_teacher is not None:
             guided_teacher.save_state(force=True)
-    except Exception as e:
+    except (OSError, ValueError, RuntimeError) as e:
         print(f"Failed to save state: {e}")
-
 
 def init_app():
     global screen, clock, SCREEN_WIDTH, SCREEN_HEIGHT
