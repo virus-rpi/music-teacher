@@ -45,7 +45,7 @@ class Synth:
         chords, times, _, _, (start_index, _) = midi_teacher.get_notes_for_measure(measure_index)
         self.play_notes(chords, times, start_index=start_index if set_index_callback else None, set_index_callback=set_index_callback, reset_to_index=reset_to_index)
 
-    def play_notes(self, chords, times, start_index=None, set_index_callback=None, reset_to_index=None):
+    def play_notes(self, chords, times, start_index=None, set_index_callback=None, reset_to_index=None): # TODO: playback using actual midi events
         """Play a sequence of chords with their corresponding times. The times are in milliseconds and say when a cord should be played relative to the first chord.
         If notes_xs and set_index_callback are provided, set_index_callback is called with the index in notes_xs corresponding to the current chord as each chord is played."""
         if not chords or not times:
