@@ -1,6 +1,5 @@
 import difflib
 from collections import defaultdict
-from pprint import pprint
 from typing import Optional
 import numpy as np
 from mido import MidiTrack
@@ -68,7 +67,7 @@ def _match_notes(ref_notes: list[Note], rec_notes: list[Note]) -> tuple[list[tup
     row_ind, col_ind = linear_sum_assignment(cost_matrix)
     matches = []
     extras = []
-    for r, c in zip(row_ind, col_ind):
+    for r, c in zip(row_ind, col_ind, strict=True):
         if r < m and c < n and cost_matrix[r, c] < k:
             matches.append((ref_notes[r], rec_notes[c]))
         elif r < m:
@@ -114,8 +113,7 @@ def _evaluate_pedal_use(ref_pedals: list[PedalEvent], rec_pedals: list[PedalEven
 
         for tag, i1, i2, j1, j2 in opcodes:
             if tag == "equal":
-                for k in range(i2 - i1):
-                    correct += 1
+                correct += (i2 - i1)
             elif tag == "replace":
                 for k in range(max(i2 - i1, j2 - j1)):
                     ref_idx = i1 + k if i1 + k < i2 else None
@@ -457,4 +455,3 @@ class Evaluator:
         evaluation.hand_summary = hand_stats
 
         self._evaluation = evaluation
-        pprint(evaluation)

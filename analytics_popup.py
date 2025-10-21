@@ -7,7 +7,7 @@ import matplotlib
 import numpy as np
 import pygame
 
-from mt_types import PerformanceEvaluation, Note
+from mt_types import PerformanceEvaluation
 from flexbox import FlexBox
 from save_system import SaveSystem
 
@@ -317,11 +317,11 @@ class AnalyticsPopup:
                     self._selected_section = section
                     self._selected_pass = pass_num
 
-    def _get_selected_evaluation(self):
+    def _get_selected_evaluation(self) -> PerformanceEvaluation:
         if not (self.pass_map and self.pass_map[self._selected_measure] and self.pass_map[self._selected_measure][
             self._selected_section] and self.pass_map[self._selected_measure][self._selected_section][
                     self._selected_pass]):
-            return {}
+            return PerformanceEvaluation()
         with self.save_system.guided_teacher_data as s:
             raw = json.loads(
                 s.load_file(self.pass_map[self._selected_measure][self._selected_section][self._selected_pass]))
@@ -378,10 +378,11 @@ class AnalyticsPopup:
             else:
                 slots_with_merged_gaps.extend([None] * gap_size)
 
+        slot_index_map = {p: idx for idx, p in enumerate(slots_with_merged_gaps) if p is not None}
         def pitch_to_y(pitch):
-            if pitch not in slots_with_merged_gaps:
+            if pitch not in slot_index_map:
                 return None
-            slot_index = slots_with_merged_gaps.index(pitch)
+            slot_index = slot_index_map[pitch]
             return padded_bottom - slot_index * (padded_height / len(slots_with_merged_gaps))
 
         bar_height = padded_height / len(slots_with_merged_gaps)

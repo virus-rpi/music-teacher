@@ -1,22 +1,10 @@
 import time
 from bisect import bisect_left, bisect_right
-from dataclasses import dataclass
 import mido
 from save_system import SaveSystem
 from sheet_music import SheetMusicRenderer
-from mt_types import Note, PedalEvent
+from mt_types import Note, PedalEvent, MeasureData
 from midi_utils import extract_notes_and_pedal
-
-@dataclass
-class MeasureData:
-    chords: tuple[list[tuple[int, str]], ...]= ()
-    times: tuple[int, ...] = ()
-    xs: tuple[int, ...] = ()
-    start_x: int = 0
-    end_x: int = 0
-    start_index: int = 0
-    end_index: int = 0
-    midi_msgs: dict[int, list[mido.Message]] = ()
 
 class MidiTeacher:
     def __init__(self, midi_path, sheet_music_renderer: SheetMusicRenderer, save_system: SaveSystem = None):
@@ -330,9 +318,9 @@ class MidiTeacher:
                 start_index = end_index = chord_idx
 
             self.measures.append(MeasureData(
-                chords=tuple(measure_chords),
-                times=tuple(measure_chord_times),
-                xs=tuple(measure_note_xs),
+                chords=measure_chords,
+                times=measure_chord_times,
+                xs=measure_note_xs,
                 start_x=start_x,
                 end_x=end_x,
                 start_index=start_index,
@@ -340,15 +328,15 @@ class MidiTeacher:
             ))
         print(f"Built measure data in {time.perf_counter() - timer:.3f} seconds")
 
-    def get_notes_for_measure(self, measure_index, unpacked=True) -> tuple[tuple, tuple, tuple, tuple[int, int], tuple[int, int], dict[int, list[mido.Message]]] | MeasureData:
+    def get_notes_for_measure(self, measure_index, unpacked=True) -> tuple[list, list, list, tuple[int, int], tuple[int, int]] | MeasureData:
         """Returns (chords, times, note_xs, (start_x, end_x), (start_index, end_index), midi_msgs) for the given measure index."""
         if 0 <= measure_index < len(self.measures):
             if unpacked:
                 measure_data = self.measures[measure_index]
-                return measure_data.chords, measure_data.times, measure_data.xs, (measure_data.start_x, measure_data.end_x), (measure_data.start_index, measure_data.end_index), measure_data.midi_msgs
+                return measure_data.chords, measure_data.times, measure_data.xs, (measure_data.start_x, measure_data.end_x), (measure_data.start_index, measure_data.end_index)
             else:
                 return self.measures[measure_index]
-        return (), (), (), (0, 0), (0, 0), {} if unpacked else MeasureData()
+        return [], [], [], (0, 0), (0, 0) if unpacked else MeasureData()
 
     def get_performed_notes_for_measure(self, measure_index, section, pass_num):
         """Load performed notes from the corresponding MIDI file for a specific measure, section, and pass."""

@@ -1,10 +1,10 @@
 import time
 from collections import deque
-from dataclasses import dataclass, asdict
+from dataclasses import asdict
 import mido
 import pygame
 from evaluator import Evaluator
-from mt_types import PerformanceEvaluation
+from mt_types import PerformanceEvaluation, MeasureSection
 from midi_teach import MidiTeacher
 from synth import Synth
 from abc import ABC, abstractmethod
@@ -16,14 +16,6 @@ from save_system import SaveSystem
 
 CHORDS_PER_SECTION = (3, 4)
 SAVE_THROTTLE_SECONDS = 2.0
-
-@dataclass(frozen=True)
-class MeasureSection:
-    chords: list
-    times: list
-    xs: list
-    start_idx: int
-    end_idx: int
 
 class Task(ABC):
     def __init__(self, teacher: 'GuidedTeacher'):
@@ -50,8 +42,8 @@ class PlaybackMeasureTask(Task):
         self.played = False
 
     def on_start(self):
-        _, _, self.notes_x, _, _, _ = self.teacher.midi_teacher.get_notes_for_measure(self.measure)
-        self.teacher.current_section_visual_info = [self.notes_x[0], self.notes_x[-1]]
+        _, _, self.notes_x, _, _ = self.teacher.midi_teacher.get_notes_for_measure(self.measure)
+        self.teacher.current_section_visual_info = [self.notes_x[0], self.notes_x[-1]] if self.notes_x else None
 
     def on_end(self):
         self.teacher.current_section_visual_info = None
@@ -147,11 +139,7 @@ class PracticeSectionTask(Task):
         if self.timer_start is not None:
             for msg in midi_events:
                 t = getattr(msg, 'time', time.time())
-                if self._last_record_time is None:
-                    delta_ms = 0
-                else:
-                    delta_ms = max(int((t - self._last_record_time) * 1000), 0)
-                msg.time = delta_ms
+                delta_ms = max(int((t - self._last_record_time) * 1000), 0) if self._last_record_time is not None else 0
                 self.recording.append(msg.copy(time=delta_ms))
                 self._last_record_time = t
 
@@ -184,7 +172,7 @@ class PracticeSectionTask(Task):
 
 class PracticeMeasureTask(PracticeSectionTask):
     def __init__(self, teacher: 'GuidedTeacher', measure):
-        chords, times, xs, _, (measure_start_index, _), _ = teacher.midi_teacher.get_notes_for_measure(measure)
+        chords, times, xs, _, (measure_start_index, _) = teacher.midi_teacher.get_notes_for_measure(measure)
         start_idx = measure_start_index
         end_idx = start_idx + len(chords) - 1 if chords else start_idx
         section = MeasureSection(chords, times, xs, start_idx, end_idx)
@@ -193,10 +181,14 @@ class PracticeMeasureTask(PracticeSectionTask):
 
 class PracticeTransitionTask(PracticeSectionTask):
     def __init__(self, teacher, from_measure, to_measure):
-        from_chords, from_times, from_xs, _, (from_start_idx, _), _ = teacher.midi_teacher.get_notes_for_measure(from_measure)
-        to_chords, to_times, to_xs, _, (to_start_idx, _), _ = teacher.midi_teacher.get_notes_for_measure(to_measure)
+        from_chords, from_times, from_xs, _, (from_start_idx, _) = teacher.midi_teacher.get_notes_for_measure(from_measure)
+        to_chords, to_times, to_xs, _, (to_start_idx, _) = teacher.midi_teacher.get_notes_for_measure(to_measure)
         section_chords = from_chords[-2:] + to_chords[:2]
-        section_times = [0, from_times[-1] - from_times[-2]]  + [(from_times[-1] - from_times[-2])*2, to_times[1] + (from_times[-1] - from_times[-2])*2]
+        if len(from_times) >= 2 and len(to_times) >= 2:
+            dt = from_times[-1] - from_times[-2]
+            section_times = [0, dt] + [2 * dt, to_times[1] + 2 * dt]
+        else:
+            section_times = [0] * len(section_chords)
         section_xs = from_xs[-2:] + to_xs[:2]
         start_idx = from_start_idx + max(0, len(from_chords) - 2)
         end_idx = to_start_idx + min(1, len(to_chords) - 1) if to_chords else start_idx
@@ -317,7 +309,8 @@ class GuidedTeacher:
 
         if not self.current_task and self.tasks:
             self.next_task()
-        self.current_task.on_tick(pressed_notes, midi_events, pygame_events)
+        if not self.current_task:
+            self.current_task.on_tick(pressed_notes, midi_events, pygame_events)
 
         for event in pygame_events:
             if event.type == pygame.KEYDOWN:
@@ -370,7 +363,7 @@ class GuidedTeacher:
         self.save_state(force=True)
 
     def split_measure_into_sections(self, measure_index):
-        measure_chords, measure_times, measure_xs, _, (measure_start_index, _), _ = self.midi_teacher.get_notes_for_measure(measure_index)
+        measure_chords, measure_times, measure_xs, _, (measure_start_index, _) = self.midi_teacher.get_notes_for_measure(measure_index)
         if not measure_chords:
             return []
 

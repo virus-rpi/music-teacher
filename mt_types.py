@@ -62,7 +62,7 @@ class Issue:
     """Represents a specific issue found during evaluation."""
     time_ms: int
     note: Optional[int] = None
-    severity: float = 0.0    # 0–1 scaled severity
+    severity: float = 0.0    # 0-1 scaled severity
     category: issue_category = ""
     description: str = ""
 
@@ -112,3 +112,20 @@ class PerformanceEvaluation:
     pedal_score: float = 0.0
     comments: Optional[list[str]] = None
 
+@dataclass(frozen=True)
+class MeasureSection:
+    chords: list
+    times: list
+    xs: list
+    start_idx: int
+    end_idx: int
+
+@dataclass
+class MeasureData:
+    chords: list[list[tuple[int, str]]]= field(default_factory=list)
+    times: list[int] = field(default_factory=list)
+    xs: list[int] = field(default_factory=list)
+    start_x: int = 0
+    end_x: int = 0
+    start_index: int = 0
+    end_index: int = 0
